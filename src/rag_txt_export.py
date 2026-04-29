@@ -109,6 +109,13 @@ def normalize_text(value: str) -> str:
     return "\n".join(compacted).strip()
 
 
+def split_display_lines(value: str) -> list[str]:
+    if not value:
+        return [""]
+    lines = value.splitlines()
+    return lines if lines else [value]
+
+
 def safe_filename_part(value: str) -> str:
     cleaned = UNSAFE_FILENAME_RE.sub("_", value)
     cleaned = re.sub(r"\s+", "_", cleaned).strip(" ._")
@@ -277,6 +284,110 @@ class PlainTextResolver:
                 cells.append({"cell_id": cell_id, **payload})
         return sorted(cells, key=lambda item: (int(item.get("row") or 0), int(item.get("col") or 0), item["cell_id"]))
 
+    def table_column_count(self, table_id: str, table: Any, cells: list[dict[str, Any]]) -> int:
+        if isinstance(table, dict):
+            try:
+                column_count = int(table.get("column_count") or 0)
+            except (TypeError, ValueError):
+                column_count = 0
+            if column_count > 0:
+                return column_count
+        max_column = 0
+        for cell in cells:
+            try:
+                column = int(cell.get("col") or 0)
+                colspan = int(cell.get("colspan") or 1)
+            except (TypeError, ValueError):
+                continue
+            max_column = max(max_column, column + max(colspan, 1) - 1)
+        return max(max_column, 1 if cells else 0)
+
+    def table_row_count(self, table: Any, rows: dict[int, list[dict[str, Any]]]) -> int:
+        if isinstance(table, dict):
+            try:
+                row_count = int(table.get("row_count") or 0)
+            except (TypeError, ValueError):
+                row_count = 0
+            if row_count > 0:
+                return row_count
+        return max(rows, default=0)
+
+    def render_table_boundary(self, widths: list[int]) -> str:
+        return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+
+    def distribute_table_width(self, widths: list[int], start_index: int, span: int, deficit: int) -> None:
+        if deficit <= 0 or span <= 0:
+            return
+        base_increase = deficit // span
+        remainder = deficit % span
+        for offset in range(span):
+            widths[start_index + offset] += base_increase
+            if offset < remainder:
+                widths[start_index + offset] += 1
+
+    def render_resolved_table(
+        self,
+        rows: dict[int, list[dict[str, Any]]],
+        *,
+        table: Any,
+        column_count: int,
+        seen_cells: set[str],
+        seen_tables: set[str],
+        result: ResolvedValue,
+    ) -> str:
+        if column_count <= 0:
+            return ""
+
+        rendered_rows: list[list[dict[str, Any]]] = []
+        widths = [1] * column_count
+        row_count = self.table_row_count(table, rows)
+        for row_index in range(1, row_count + 1):
+            rendered_cells: list[dict[str, Any]] = []
+            for cell in sorted(rows.get(row_index) or [], key=lambda item: (int(item.get("col") or 0), item["cell_id"])):
+                try:
+                    column = max(1, int(cell.get("col") or 1))
+                    colspan = max(1, int(cell.get("colspan") or 1))
+                except (TypeError, ValueError):
+                    column = 1
+                    colspan = 1
+                start_index = min(column - 1, column_count - 1)
+                colspan = max(1, min(colspan, column_count - start_index))
+                cell_result = self.resolve_cell(str(cell["cell_id"]), seen_cells=seen_cells, seen_tables=seen_tables)
+                result.merge(cell_result)
+                lines = split_display_lines(cell_result.text)
+                needed_width = max((len(line) for line in lines), default=1)
+                current_width = sum(widths[start_index:start_index + colspan]) + (3 * (colspan - 1))
+                self.distribute_table_width(widths, start_index, colspan, needed_width - current_width)
+                rendered_cells.append(
+                    {
+                        "start_index": start_index,
+                        "colspan": colspan,
+                        "lines": lines,
+                    }
+                )
+            if rendered_cells:
+                rendered_rows.append(rendered_cells)
+
+        if not rendered_rows:
+            return ""
+
+        boundary = self.render_table_boundary(widths)
+        output_lines = [boundary]
+        for row_cells in rendered_rows:
+            row_height = max((len(cell["lines"]) for cell in row_cells), default=1)
+            for line_index in range(row_height):
+                parts = ["|"]
+                for cell in row_cells:
+                    start_index = int(cell["start_index"])
+                    colspan = int(cell["colspan"])
+                    inner_width = sum(widths[start_index:start_index + colspan]) + (3 * (colspan - 1))
+                    line = cell["lines"][line_index] if line_index < len(cell["lines"]) else ""
+                    parts.append(f" {line.ljust(inner_width)} ")
+                    parts.append("|")
+                output_lines.append("".join(parts))
+            output_lines.append(boundary)
+        return "\n".join(output_lines)
+
     def resolve_table(self, table_id: str, *, seen_cells: set[str], seen_tables: set[str]) -> ResolvedValue:
         result = ResolvedValue(table_ids={table_id})
         if table_id in seen_tables:
@@ -293,18 +404,17 @@ class PlainTextResolver:
         rows: dict[int, list[dict[str, Any]]] = {}
         for cell in cells:
             rows.setdefault(int(cell.get("row") or 0), []).append(cell)
-
-        row_lines: list[str] = []
-        for row_index in sorted(rows):
-            row_values: list[str] = []
-            for cell in sorted(rows[row_index], key=lambda item: (int(item.get("col") or 0), item["cell_id"])):
-                cell_result = self.resolve_cell(str(cell["cell_id"]), seen_cells=seen_cells, seen_tables=next_seen_tables)
-                result.merge(cell_result)
-                if cell_result.text:
-                    row_values.append(cell_result.text.replace("\n", " "))
-            if row_values:
-                row_lines.append(" | ".join(row_values))
-        result.text = normalize_text("\n".join(row_lines))
+        column_count = self.table_column_count(table_id, table, cells)
+        result.text = normalize_text(
+            self.render_resolved_table(
+                rows,
+                table=table,
+                column_count=column_count,
+                seen_cells=seen_cells,
+                seen_tables=next_seen_tables,
+                result=result,
+            )
+        )
         return result
 
 

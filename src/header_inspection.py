@@ -271,6 +271,16 @@ def build_chunk_records(
 
 def build_section_spans(chunk_records: list[dict[str, Any]], section_id: str) -> list[dict[str, Any]]:
     spans: list[dict[str, Any]] = []
+
+    if section_id == "SEC99":
+        span_index = 0
+        for record in chunk_records:
+            if section_id not in record["predicted_sections"]:
+                continue
+            span_index += 1
+            spans.append({"section_id": section_id, "span_index": span_index, "records": (record,)})
+        return spans
+
     active_records: list[dict[str, Any]] = []
     span_index = 0
 
