@@ -442,6 +442,18 @@ def build_hierarchy_path(hierarchy: list[dict[str, Any]]) -> str:
     return " > ".join(labels)
 
 
+def format_document_header(value: Any) -> str:
+    lines = [line.strip() for line in normalize_text(str(value or "")).splitlines() if line.strip()]
+    if not lines:
+        return "Document: {}"
+    if len(lines) == 1:
+        return f"Document: {{ {lines[0]} }}"
+    formatted_lines = ["Document: {"]
+    formatted_lines.extend(f"  {line}" for line in lines)
+    formatted_lines.append("}")
+    return "\n".join(formatted_lines)
+
+
 def format_number_path(indices: list[int]) -> str:
     return "_".join(f"{max(0, index):02d}" for index in indices)
 
@@ -458,10 +470,11 @@ def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, s
     ]
     section_label = " - ".join(part for part in section_parts if part)
     content_lines = [
-        f"Document: {metadata.get('document_name', '')}",
+        "--- RAG METADATA ---",
+        format_document_header(metadata.get("document_header") or metadata.get("document_name") or ""),
         f"Section: {section_label}",
         f"Hierarchy: {metadata.get('hierarchy_path', '')}",
-        f"Chunk type: {metadata.get('chunk_type', '')}",
+        "--- END RAG METADATA ---",
         "",
     ]
 
@@ -491,6 +504,7 @@ def base_metadata(
     indices: dict[str, int],
     output_file_name: str,
     resolved_values: list[ResolvedValue],
+    document_header: str,
 ) -> dict[str, Any]:
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     original_document_name = repair_text(summary.get("document_name") or result.get("document_name") or "")
@@ -509,6 +523,7 @@ def base_metadata(
         "chunk_id": Path(output_file_name).stem,
         "chunk_type": chunk_type,
         "document_name": document_name,
+        "document_header": document_header or document_name,
         "original_document_name": original_document_name,
         "document_path": repair_text(summary.get("document_path") or ""),
         "document_sop_code": find_sop_code(document_name),
@@ -570,9 +585,8 @@ def ordered_file_name(base_name: str, *, order_state: dict[str, int], used_names
     return unique_file_name(f"{next_order_prefix(order_state)}_{base_name}", used_names)
 
 
-def section_hierarchy(document_name: str, section_id: str, section_heading: str) -> list[dict[str, Any]]:
+def section_hierarchy(section_id: str, section_heading: str) -> list[dict[str, Any]]:
     return [
-        {"level": 0, "type": "document", "title": document_name},
         {
             "level": 1,
             "type": "section",
@@ -666,6 +680,48 @@ def resolve_section_content(section_payload: Any, resolver: PlainTextResolver) -
     return blocks, resolved_values
 
 
+def extract_document_header(section_json_payload: dict[str, Any], resolver: PlainTextResolver) -> str:
+    results = section_json_payload.get("results") if isinstance(section_json_payload.get("results"), list) else []
+    for result in results:
+        if not isinstance(result, dict) or result.get("section_id") != "SEC02" or result.get("status") != "resolved":
+            continue
+        section_json = result.get("section_json")
+        if not isinstance(section_json, dict):
+            continue
+
+        lines: list[str] = []
+        rows = section_json.get("rows")
+        if isinstance(rows, list):
+            for row in rows:
+                row_values: list[str] = []
+                if isinstance(row, dict) and isinstance(row.get("cells"), list):
+                    values = row["cells"]
+                elif isinstance(row, list):
+                    values = row
+                elif isinstance(row, dict):
+                    values = [value for key, value in row.items() if key != "type"]
+                else:
+                    values = [row]
+                for value in values:
+                    resolved = resolver.resolve(value)
+                    if resolved.text:
+                        row_values.append(resolved.text.replace("\n", " "))
+                if row_values:
+                    lines.append(" | ".join(row_values))
+
+        if not lines and "content" in section_json:
+            resolved = resolver.resolve(section_json.get("content"))
+            if resolved.text:
+                lines.extend(line for line in resolved.text.splitlines() if line.strip())
+
+        header = normalize_text("\n".join(lines))
+        if header:
+            return header
+
+    summary = section_json_payload.get("summary") if isinstance(section_json_payload.get("summary"), dict) else {}
+    return strip_document_run_suffix(summary.get("document_name") or "")
+
+
 def export_workflow_entries(
     *,
     output_dir: Path,
@@ -675,6 +731,7 @@ def export_workflow_entries(
     resolver: PlainTextResolver,
     used_names: set[str],
     order_state: dict[str, int],
+    document_header: str,
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
     section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
@@ -682,7 +739,6 @@ def export_workflow_entries(
     entries = section_json.get("entries") if isinstance(section_json.get("entries"), list) else []
     columns = workflow_columns(section_json, entries)
     chunks: list[dict[str, Any]] = []
-    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
     header_levels = {
@@ -733,7 +789,7 @@ def export_workflow_entries(
         hierarchy_numbers = active_indices + [item_index]
         base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
         file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
-        hierarchy = section_hierarchy(document_name, section_id, section_heading)
+        hierarchy = section_hierarchy(section_id, section_heading)
         hierarchy.extend(active_headers)
         indices = {"path": hierarchy_numbers}
         metadata = base_metadata(
@@ -746,6 +802,7 @@ def export_workflow_entries(
             indices=indices,
             output_file_name=file_name,
             resolved_values=[resolved for _, resolved in field_values],
+            document_header=document_header,
         )
         chunks.append(
             write_chunk(
@@ -767,13 +824,13 @@ def export_general_instruction_entries(
     resolver: PlainTextResolver,
     used_names: set[str],
     order_state: dict[str, int],
+    document_header: str,
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
     section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
     prefix = section_file_prefix(section_id, section_english)
     entries = section_json.get("entries") if isinstance(section_json.get("entries"), list) else []
     chunks: list[dict[str, Any]] = []
-    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
     subsection_index = 0
@@ -806,7 +863,7 @@ def export_general_instruction_entries(
         hierarchy_numbers = ([subsection_index] if subsection_index else []) + [item_index]
         base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
         file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
-        hierarchy = section_hierarchy(document_name, section_id, section_heading)
+        hierarchy = section_hierarchy(section_id, section_heading)
         if active_heading:
             hierarchy.append(
                 {
@@ -828,6 +885,7 @@ def export_general_instruction_entries(
             indices=indices,
             output_file_name=file_name,
             resolved_values=[resolved],
+            document_header=document_header,
         )
         label = heading if heading else "Instruction"
         chunks.append(
@@ -850,11 +908,11 @@ def export_rows_or_content(
     resolver: PlainTextResolver,
     used_names: set[str],
     order_state: dict[str, int],
+    document_header: str,
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
     section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
     prefix = section_file_prefix(section_id, section_english)
-    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
     content_blocks, resolved_values = resolve_section_content(section_json, resolver)
@@ -862,7 +920,7 @@ def export_rows_or_content(
         return []
 
     file_name = ordered_file_name(f"{prefix}.txt", order_state=order_state, used_names=used_names)
-    hierarchy = section_hierarchy(document_name, section_id, section_heading)
+    hierarchy = section_hierarchy(section_id, section_heading)
     metadata = base_metadata(
         payload=payload,
         result=result,
@@ -873,6 +931,7 @@ def export_rows_or_content(
         indices={"path": []},
         output_file_name=file_name,
         resolved_values=resolved_values,
+        document_header=document_header,
     )
     return [
         write_chunk(
@@ -906,6 +965,7 @@ def export_rag_txt_files(
     chunks: list[dict[str, Any]] = []
     used_names: set[str] = set()
     order_state = {"value": 0}
+    document_header = extract_document_header(section_json_payload, resolver)
     results = section_json_payload.get("results") if isinstance(section_json_payload.get("results"), list) else []
     for result in results:
         if not isinstance(result, dict) or result.get("status") != "resolved":
@@ -929,6 +989,7 @@ def export_rag_txt_files(
                     resolver=resolver,
                     used_names=used_names,
                     order_state=order_state,
+                    document_header=document_header,
                 )
             )
         elif section_id == "SEC11" and isinstance(entries, list):
@@ -941,6 +1002,7 @@ def export_rag_txt_files(
                     resolver=resolver,
                     used_names=used_names,
                     order_state=order_state,
+                    document_header=document_header,
                 )
             )
         else:
@@ -953,6 +1015,7 @@ def export_rag_txt_files(
                     resolver=resolver,
                     used_names=used_names,
                     order_state=order_state,
+                    document_header=document_header,
                 )
             )
 
@@ -960,6 +1023,7 @@ def export_rag_txt_files(
     manifest = {
         "export_type": "rag_txt",
         "document_name": strip_document_run_suffix(summary.get("document_name") or ""),
+        "document_header": document_header,
         "document_path": repair_text(summary.get("document_path") or ""),
         "included_sections": sorted(include_sections) if include_sections is not None else "all",
         "output_dir": str(output_dir),
