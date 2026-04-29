@@ -28,6 +28,7 @@ const reviewCount = el('reviewCount');
 const approveAllButton = el('approveAllButton');
 const continueButton = el('continueButton');
 const finalDocument = el('finalDocument');
+const downloadButton = el('downloadButton');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -289,6 +290,10 @@ uploadForm.addEventListener('submit', async (event) => {
   }
   show(uploadPanel, false);
   show(statusPanel, true);
+});
+
+downloadButton.addEventListener('click', () => {
+  window.location.href = '/api/download';
 });
 
 fetch('/api/state').then((response) => response.json()).then(applySnapshot).finally(startEvents);

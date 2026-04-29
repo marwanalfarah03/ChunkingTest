@@ -1168,6 +1168,22 @@ def api_final() -> Response:
     return jsonify({"html": job.final_html})
 
 
+@app.get("/api/download")
+def api_download() -> Response:
+    with _jobs_lock:
+        job = _jobs.get(_active_job_id or "")
+    if job is None or job.section_json_payload is None:
+        return jsonify({"error": "The final document is not ready yet."}), 404
+    safe_name = re.sub(r'[^\w\-. ]', '_', job.display_name).strip() or "document"
+    filename = f"{safe_name}.json"
+    data = json.dumps(job.section_json_payload, ensure_ascii=False, indent=2)
+    return Response(
+        data,
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/assets/<job_id>/<asset_id>")
 def api_asset(job_id: str, asset_id: str) -> Response:
     job = _jobs.get(job_id)
