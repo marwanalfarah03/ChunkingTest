@@ -646,6 +646,19 @@ class DocumentRenderer:
             body = self.render_generic_value(payload)
         return '<article class="final-section">' f'{self.render_heading(heading, fallback_heading)}' f'{body}</article>'
 
+    def render_section_fallback(self, section_id: str, result: dict[str, Any]) -> str:
+        chunk_names = result.get("source_chunk_file_names") or []
+        chunk_paths = result.get("source_relative_paths") or []
+        section_meta = section_display(section_id)
+        heading_html = self.render_heading(section_meta["label"], section_meta["label"])
+        body_html = "".join(
+            self.render_chunk(str(name), str(path))
+            for name, path in zip(chunk_names, chunk_paths)
+        )
+        if not body_html:
+            return ""
+        return f'<article class="final-section">{heading_html}{body_html}</article>'
+
     def render_final_document(self, section_payload: dict[str, Any], display_name: str) -> str:
         results = section_payload.get("results") or []
         pieces = [
@@ -659,7 +672,12 @@ class DocumentRenderer:
         for result in results:
             if not isinstance(result, dict) or result.get("status") != "resolved":
                 continue
-            html = self.render_section_payload(str(result.get("section_id") or ""), result.get("section_json"))
+            section_id = str(result.get("section_id") or "")
+            section_json = result.get("section_json")
+            if isinstance(section_json, dict) and section_json.get("status") == "not_found":
+                html = self.render_section_fallback(section_id, result)
+            else:
+                html = self.render_section_payload(section_id, section_json)
             if html:
                 pieces.append(html)
                 rendered_count += 1
