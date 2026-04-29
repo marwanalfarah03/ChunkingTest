@@ -267,14 +267,9 @@ class PlainTextResolver:
 
     def resolve_asset(self, asset_id: str) -> ResolvedValue:
         result = ResolvedValue(asset_ids={asset_id})
-        asset = self.asset_map.get(asset_id)
-        if not isinstance(asset, dict):
-            result.text = f"Embedded asset: {asset_id}"
+        result.text = f"<{asset_id}>"
+        if not isinstance(self.asset_map.get(asset_id), dict):
             result.unresolved_refs.add(asset_id)
-            return result
-        label = repair_text(asset.get("original_name") or asset.get("stored_name") or asset_id)
-        content_type = repair_text(asset.get("content_type") or "")
-        result.text = normalize_text(f"Embedded asset: {label}" + (f" ({content_type})" if content_type else ""))
         return result
 
     def cells_for_table(self, table_id: str) -> list[dict[str, Any]]:
