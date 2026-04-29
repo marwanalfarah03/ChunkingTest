@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote as _url_quote
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 
@@ -1174,13 +1175,21 @@ def api_download() -> Response:
         job = _jobs.get(_active_job_id or "")
     if job is None or job.section_json_payload is None:
         return jsonify({"error": "The final document is not ready yet."}), 404
-    safe_name = re.sub(r'[^\w\-. ]', '_', job.display_name).strip() or "document"
-    filename = f"{safe_name}.json"
+    raw_name = re.sub(r'\s+', ' ', job.display_name).strip() or "document"
+    filename = f"{raw_name}.json"
+    # ASCII-safe fallback for clients that don't support RFC 5987
+    ascii_filename = re.sub(r'[^\x20-\x7e]', '_', filename)
+    # RFC 5987 percent-encoded UTF-8 filename for modern clients
+    encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+    content_disposition = (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{encoded_filename}"
+    )
     data = json.dumps(job.section_json_payload, ensure_ascii=False, indent=2)
     return Response(
         data,
         mimetype="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )
 
 
