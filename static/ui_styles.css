@@ -356,7 +356,7 @@ button { cursor: pointer; }
   background: #f8faf9;
   border: 1px solid var(--line);
   line-height: 1.75;
-  unicode-bidi: plaintext;
+  unicode-bidi: embed;
 }
 .nested-content { margin-inline-start: 22px; }
 .content-label { margin-bottom: 8px; color: var(--cbo-sky); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
@@ -400,7 +400,7 @@ button { cursor: pointer; }
   line-height: 1.65;
   white-space: pre-wrap;
   text-align: start;
-  unicode-bidi: plaintext;
+  unicode-bidi: embed;
 }
 .doc-table th, .workflow-table th {
   background: var(--cbo-blue);
@@ -411,7 +411,7 @@ button { cursor: pointer; }
 .workflow-owner { width: 28%; background: #f6f8f9; font-weight: 750; }
 .rich-text {
   white-space: pre-wrap;
-  unicode-bidi: plaintext;
+  unicode-bidi: embed;
   text-align: start;
 }
 td > .rich-text,
