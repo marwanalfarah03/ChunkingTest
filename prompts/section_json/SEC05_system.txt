@@ -1,0 +1,80 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC05 — ضبط الإصدار (Version Control)
+
+This section is the version history table. It has the heading "ضبط الإصدار" (or "ضبط الاصدار") as a full-width colored title row, followed by a column-header row, followed by multiple data rows — one per version entry. The table always has 4 columns. It is typically the largest of the administrative header sections (8–20+ rows) and may be split across multiple txt files if the document has many versions; when this happens, the input will already have been merged into one continuous table before reaching this prompt.
+
+Canonical column order (from column header inspection): ["رقم الاصدار", "تاريخه", "تم الاعداد / التعديل من قبل", "اسباب التعديل"]
+(The third column may appear with minor OCR variation: "تم الاعداد العديل من قبل", "الاعداد / التعديل", etc.)
+
+Column headers are colored and appear as CL IDs in the rendered output. Data cells are also colored.
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC05.
+3. Column header inspection result for SEC05 (passed as context): the resolved valid_column_order and actual_header_cell_ids. Use these as column labels and header cell identifiers.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC05.
+- The full-width heading row: "ضبط الإصدار [#xxxxxx]" or "ضبط الاصدار [#xxxxxx]"
+- A column-header row (may be visible labels or CL IDs if hidden).
+- Many data rows with CL references (CL000023–CL000100+ typical).
+- Color codes, HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Return only valid JSON with this exact structure:
+
+{
+  "section_id": "SEC05",
+  "section_heading": "<heading text as it appears>",
+  "columns": ["رقم الاصدار", "تاريخه", "تم الاعداد / التعديل من قبل", "اسباب التعديل"],
+  "header_cell_ids": ["CL000019", "CL000020", "CL000021", "CL000022"],
+  "rows": [
+    {
+      "رقم الاصدار": "<value or CL ID>",
+      "تاريخه": "<value or CL ID>",
+      "تم الاعداد / التعديل من قبل": "<value or CL ID>",
+      "اسباب التعديل": "<value or CL ID>"
+    }
+  ]
+}
+
+Rules:
+- Use the column labels from the column header inspection result as keys.
+- "columns" must exactly match the resolved valid_column_order from the inspection result.
+- "header_cell_ids" must list the actual header cell IDs from the inspection result (left to right). If no header row exists (missing), set "header_cell_ids" to [].
+- If the column header row is visible, do NOT duplicate those cells as a data row.
+- Include ALL data rows in order — this is the complete version history.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- If the input is a merged multi-txt span (multiple tables concatenated), traverse all rows in order; do not restart row numbering or skip rows between former table boundaries.
+- If the column header inspection result is not provided, infer columns from visible labels. Default order: ["رقم الاصدار", "تاريخه", "تم الاعداد / التعديل من قبل", "اسباب التعديل"].
+- If SEC05 content is not found in the input, return {"section_id": "SEC05", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output:
+{
+  "section_id": "SEC05",
+  "section_heading": "ضبط الإصدار [#243744]",
+  "columns": ["رقم الاصدار", "تاريخه", "تم الاعداد / التعديل من قبل", "اسباب التعديل"],
+  "header_cell_ids": ["CL000019", "CL000020", "CL000021", "CL000022"],
+  "rows": [
+    {
+      "رقم الاصدار": "CL000023",
+      "تاريخه": "CL000024",
+      "تم الاعداد / التعديل من قبل": "CL000025",
+      "اسباب التعديل": "CL000026"
+    },
+    {
+      "رقم الاصدار": "CL000027",
+      "تاريخه": "CL000028",
+      "تم الاعداد / التعديل من قبل": "CL000029",
+      "اسباب التعديل": "CL000030"
+    }
+  ]
+}

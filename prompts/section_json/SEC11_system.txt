@@ -1,0 +1,101 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC11 — التعليمات العامة (General Instructions)
+
+This section provides overarching internal guidelines, compliance rules, and standing operational principles. It is hierarchically structured: a main section heading row, followed by optional introductory content, followed by themed subsections (each with its own bold heading and a content cell). The section can range from a single content cell (simple) to a large multi-subsection block (complex).
+
+Typical hierarchy:
+1. Full-width main heading row: "N. التعليمات العامة [#xxxxxx]"
+2. Optional: one or more full-width introductory content cells (CL references or visible text)
+3. Repeated pattern: full-width subsection heading (bold Arabic text, e.g., "<strong>تعليمات الامتثال</strong> [#xxxxxx]") followed by one or more full-width content cells (CL references)
+
+Common subsection themes: تعليمات الامتثال, تعليمات حسابات القصر, تعليمات الأجانب / FATCA, تعليمات الأحزاب السياسية, تعليمات خاصة بـ [topic].
+
+Some documents have only one content cell and no subsections. Some are very large with 5+ subsections.
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC11.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC11.
+- The section heading: "N. التعليمات العامة [#xxxxxx]"
+- Subsection headings (bold, full-width, colored): e.g., "<strong>تعليمات الامتثال</strong> [#002060]"
+- Content cells (CL references or visible text) below each heading/subsection
+- A section may span many rows if it has many subsections
+- Color codes, HTML tags, ASCII borders
+
+Identifying the SEC11 boundary: SEC11 begins at the "التعليمات العامة" heading row and ends when a new canonical section heading appears (e.g., "الإجراء", "التعريفات", etc.) or the table ends.
+
+---
+OUTPUT FORMAT
+
+Return only valid JSON with this exact structure:
+
+{
+  "section_id": "SEC11",
+  "section_heading": "<heading text as it appears>",
+  "entries": [
+    {
+      "type": "content",
+      "value": "<CL reference or visible text>"
+    },
+    {
+      "type": "subsection",
+      "heading": "<subsection heading text as it appears>",
+      "value": "<CL reference or visible text>"
+    }
+  ]
+}
+
+Entry types:
+- "content": a content cell that appears directly under the main section heading (before any subsection).
+- "subsection": a named sub-block within the section; "heading" is the full text of the subsection heading row; "value" is the content cell immediately following it.
+- If a subsection has multiple content cells, represent each as a separate entry of type "content" immediately after the subsection entry — or combine them: add an array "values" to the subsection entry instead of a single "value".
+- Preserve document order exactly.
+
+Rules:
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including bold tags, color codes, Arabic text.
+- Do NOT include content from other sections.
+- If a subsection heading row has no following content cell before the next heading, set "value" to null.
+- If SEC11 has only a single content cell and no subsections, "entries" will have one item with "type": "content".
+- If SEC11 content is not found in the input, return {"section_id": "SEC11", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output (rich with subsections):
+{
+  "section_id": "SEC11",
+  "section_heading": "5. التعليمات العامة [#253744]",
+  "entries": [
+    {
+      "type": "content",
+      "value": "CL000144"
+    },
+    {
+      "type": "subsection",
+      "heading": "  <strong>تعليمات الامتثال</strong> [#002060]",
+      "value": "CL000146"
+    },
+    {
+      "type": "subsection",
+      "heading": "  <strong>تعليمات حسابات القصر</strong> [#0F243E]",
+      "value": "CL000148"
+    }
+  ]
+}
+
+Example output (simple, single content):
+{
+  "section_id": "SEC11",
+  "section_heading": "5. التعليمات العامة [#253744]",
+  "entries": [
+    {
+      "type": "content",
+      "value": "CL000200"
+    }
+  ]
+}

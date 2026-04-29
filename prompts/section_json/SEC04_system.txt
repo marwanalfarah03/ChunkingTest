@@ -1,0 +1,85 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC04 — إقرار الوثيقة (Document Approval)
+
+This section is the document sign-off table. It always has the heading "إقرار الوثيقة" as a full-width colored title row, followed by a column-header row, followed by one data row. The standard variant has 2 columns (preparation and review); a less common variant adds a third approval column.
+
+Canonical column orders (from column header inspection):
+- 2-column: ["الاعداد", "المراجعة"]
+- 3-column: ["الاعداد", "المراجعة", "الموافقة"]
+
+Column headers are colored and typically appear as CL IDs in the rendering. Data cells are also colored.
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC04.
+3. Column header inspection result for SEC04 (passed as context): the resolved valid_column_order and actual_header_cell_ids. Use these column labels as keys.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC04.
+- The full-width heading row: "إقرار الوثيقة [#xxxxxx]"
+- A column-header row (may be visible labels or CL IDs if hidden).
+- One data row with CL references (CL000014, CL000015 are typical, or CL000016, CL000017).
+- Color codes, HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Return only valid JSON with this exact structure:
+
+{
+  "section_id": "SEC04",
+  "section_heading": "<heading text as it appears>",
+  "columns": ["الاعداد", "المراجعة"],
+  "header_cell_ids": ["CL000014", "CL000015"],
+  "rows": [
+    {
+      "الاعداد": "<value or CL ID>",
+      "المراجعة": "<value or CL ID>"
+    }
+  ]
+}
+
+Rules:
+- Use the column labels from the column header inspection result as keys.
+- "columns" must exactly match the resolved valid_column_order from the inspection result.
+- "header_cell_ids" must list the actual header cell IDs from the inspection result. If no header row exists (missing), set "header_cell_ids" to [].
+- If column header row is visible, do NOT duplicate those cells as a data row.
+- There is normally exactly one data row. Include all data rows present.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- If the column header inspection result is not provided, infer columns from visible labels. Default: ["الاعداد", "المراجعة"].
+- If SEC04 content is not found in the input, return {"section_id": "SEC04", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output (2-column):
+{
+  "section_id": "SEC04",
+  "section_heading": "إقرار الوثيقة [#243744]",
+  "columns": ["الاعداد", "المراجعة"],
+  "header_cell_ids": ["CL000014", "CL000015"],
+  "rows": [
+    {
+      "الاعداد": "CL000016",
+      "المراجعة": "CL000017"
+    }
+  ]
+}
+
+Example output (3-column):
+{
+  "section_id": "SEC04",
+  "section_heading": "إقرار الوثيقة [#243744]",
+  "columns": ["الاعداد", "المراجعة", "الموافقة"],
+  "header_cell_ids": ["CL000014", "CL000015", "CL000016"],
+  "rows": [
+    {
+      "الاعداد": "CL000017",
+      "المراجعة": "CL000018",
+      "الموافقة": "CL000019"
+    }
+  ]
+}

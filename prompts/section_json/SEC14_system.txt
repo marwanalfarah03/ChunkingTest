@@ -1,0 +1,55 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC14 — التقارير والكشوفات (Reports & Statements)
+
+This section lists the output reports, statements, extracts, and scheduled deliverables produced by the procedure. It is almost always a minimal two-row table: one full-width heading row "التقارير والكشوفات" (often numbered) followed by a single content cell (CL reference). Occasionally the section has a slightly larger table with a few visible rows (e.g., named reports with frequency or distribution notes), but this is rare.
+
+Note: In a small number of documents, SEC14 and SEC15 share the same txt file. Focus only on SEC14 content (the "التقارير والكشوفات" block). SEC15 ("الملفات ومدد الحفظ") is a separate section even when adjacent.
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC14.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC14.
+- The section heading: "N. التقارير والكشوفات [#xxxxxx]"
+- One content cell: a CL reference or, rarely, a few rows of visible report descriptions.
+- Color codes, HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Simple format (single content cell — by far the most common):
+{
+  "section_id": "SEC14",
+  "section_heading": "<heading text as it appears>",
+  "content": "<CL reference or visible text>"
+}
+
+Table format (when multiple rows are visible with distinct report descriptions):
+{
+  "section_id": "SEC14",
+  "section_heading": "<heading text as it appears>",
+  "rows": [
+    {"type": "data_row", "cells": ["<value>", "<value>", ...]}
+  ]
+}
+
+Rules:
+- Use simple format when there is exactly one content cell after the heading.
+- Use table format when there are multiple data rows visible.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- Do NOT include content from SEC13 (الإجراءات الرقابية) or SEC15 (الملفات ومدد الحفظ).
+- If SEC14 content is not found in the input, return {"section_id": "SEC14", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output:
+{
+  "section_id": "SEC14",
+  "section_heading": "10. التقارير والكشوفات [#243744]",
+  "content": "CL000330"
+}

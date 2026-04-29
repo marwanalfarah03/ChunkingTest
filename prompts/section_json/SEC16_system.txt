@@ -1,0 +1,53 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC16 — الملاحق (Appendices)
+
+This section references supporting appendices, attachments, flowcharts, or supplementary material. It is an optional section that appears in roughly 40% of documents. It is almost always a minimal two-row table: a full-width heading row "الملاحق" or "ملحق" (often numbered), followed by a single content cell (CL reference or brief visible text listing appendix items). Occasionally the heading is "ملحق" (singular) rather than "الملاحق" (plural).
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC16.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC16.
+- The section heading: "N. الملاحق [#xxxxxx]" or "N. ملحق [#xxxxxx]"
+- One content cell: a CL reference or visible appendix listing.
+- Color codes, HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Simple format (one content cell):
+{
+  "section_id": "SEC16",
+  "section_heading": "<heading text as it appears>",
+  "content": "<CL reference or visible text>"
+}
+
+Multi-item format (when multiple appendix entries are explicitly listed):
+{
+  "section_id": "SEC16",
+  "section_heading": "<heading text as it appears>",
+  "entries": [
+    {"type": "content", "value": "<CL reference or visible text>"}
+  ]
+}
+
+Rules:
+- Use simple format when there is a single content cell.
+- Use multi-item format when there are multiple distinct rows of appendix content.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- Do NOT include content from SEC17 (النماذج المستخدمة) or other sections.
+- If SEC16 content is not found in the input, return {"section_id": "SEC16", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output:
+{
+  "section_id": "SEC16",
+  "section_heading": "7. الملاحق [#243744]",
+  "content": "CL000318"
+}

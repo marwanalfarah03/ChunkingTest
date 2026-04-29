@@ -1,0 +1,84 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC09 — المسؤوليات (Responsibilities)
+
+This section assigns duties, roles, and authorities. It appears in two distinct formats:
+
+Format A — Simple (most common): A minimal two-row table with a full-width heading row "المسؤوليات" followed by a single content cell (CL reference). The heading is sometimes numbered ("3. المسؤوليات"). Some simple tables are slightly wider (wider heading cell) but still single-content-cell.
+
+Format B — Responsibility matrix (rare): A wide multi-column table assigning specific permissions or duties to roles. Column headers describe attributes (e.g., Code, Description, authority level, approval permissions). Data rows list individual responsibility entries with CL references. This format appears when the SOP manages granular system-level permissions.
+
+Note: When the heading reads "مجال التطبيق والمسؤوليات", both SEC08 and SEC09 share the same cell; extract that shared content under both sections identically.
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC09.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC09.
+- The section heading: "N. المسؤوليات [#xxxxxx]" or "N. مجال التطبيق والمسؤوليات [#xxxxxx]".
+- For Format A: one content cell (CL reference).
+- For Format B: a column-header row (may be visible labels or CL IDs) followed by many data rows.
+- Color codes like [#253744], HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Format A — Simple:
+{
+  "section_id": "SEC09",
+  "section_heading": "<heading text as it appears>",
+  "format": "simple",
+  "content": "<CL reference or visible text>"
+}
+
+Format B — Responsibility matrix:
+{
+  "section_id": "SEC09",
+  "section_heading": "<heading text as it appears>",
+  "format": "matrix",
+  "columns": ["<col1>", "<col2>", ...],
+  "header_cell_ids": ["CL000...", ...],
+  "rows": [
+    {"<col1>": "<value>", "<col2>": "<value>", ...}
+  ]
+}
+
+Rules:
+- Use Format A when the section has a single content cell after the heading.
+- Use Format B when the section has a multi-column table with multiple data rows.
+- For Format B: "columns" lists the column labels (visible text or CL IDs if headers are hidden); "header_cell_ids" lists the actual header cell IDs if visible, or [] if the header row is hidden/absent.
+- If a column header is a CL ID, use that CL ID as the key — do NOT repeat it as a value in data rows.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- Do NOT include content from SEC08 or other sections.
+- If SEC09 content is not found in the input, return {"section_id": "SEC09", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output (Format A):
+{
+  "section_id": "SEC09",
+  "section_heading": "3. المسؤوليات [#253744]",
+  "format": "simple",
+  "content": "CL000084"
+}
+
+Example output (Format B):
+{
+  "section_id": "SEC09",
+  "section_heading": "3. المسؤوليات [#253744]",
+  "format": "matrix",
+  "columns": ["CL000040", "CL000041", "CL000042", "CL000043"],
+  "header_cell_ids": ["CL000040", "CL000041", "CL000042", "CL000043"],
+  "rows": [
+    {
+      "CL000040": "CL000044",
+      "CL000041": "CL000045",
+      "CL000042": "CL000046",
+      "CL000043": "CL000047"
+    }
+  ]
+}

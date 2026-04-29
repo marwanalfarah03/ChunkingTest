@@ -1,0 +1,99 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CBOJ SOP Document Builder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_styles.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="side-panel">
+      <div class="brand-card">
+        <div class="brand-mark">CB</div>
+        <div>
+          <p>Capital Bank</p>
+          <h1>SOP Builder</h1>
+        </div>
+      </div>
+      <div class="progress-card">
+        <div class="progress-meta">
+          <span id="phaseLabel">Ready</span>
+          <strong id="progressPercent">0%</strong>
+        </div>
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        <p id="progressDetail">Upload a DOCX document to begin.</p>
+      </div>
+      <ol id="stepList" class="step-list"></ol>
+    </aside>
+
+    <main class="main-panel">
+      <section id="uploadPanel" class="hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Document conversion workspace</p>
+          <h2>Upload a procedure document and follow the process live.</h2>
+          <p>The screen will show each stage, pause for human confirmation, then display the generated final document.</p>
+        </div>
+        <form id="uploadForm" class="upload-card">
+          <label class="drop-zone" for="documentInput">
+            <input id="documentInput" name="document" type="file" accept=".docx" required>
+            <span class="drop-icon">DOCX</span>
+            <strong id="fileLabel">Choose a DOCX file</strong>
+            <small>Tables, nested tables, colors, and embedded files will be preserved for review.</small>
+          </label>
+          <details class="settings-panel">
+            <summary>Connection settings</summary>
+            <label>AI server address
+              <input name="base_url" value="{{ default_base_url }}" autocomplete="off">
+            </label>
+            <label>Model
+              <input name="model" value="{{ default_model }}" autocomplete="off">
+            </label>
+            <label>API key
+              <input name="api_key" type="password" placeholder="{{ 'Using environment key' if has_api_key else 'Optional for local servers' }}" autocomplete="off">
+            </label>
+          </details>
+          <button id="startButton" class="primary-button" type="submit">Start</button>
+          <p id="uploadError" class="form-error"></p>
+        </form>
+      </section>
+
+      <section id="statusPanel" class="status-panel hidden">
+        <div>
+          <p class="eyebrow">Live progress</p>
+          <h2 id="statusTitle">Working</h2>
+          <p id="statusDetail">Preparing document...</p>
+        </div>
+        <div id="messageLog" class="message-log"></div>
+      </section>
+
+      <section id="reviewPanel" class="review-panel hidden">
+        <div class="review-toolbar">
+          <div>
+            <p class="eyebrow">Human confirmation</p>
+            <h2>Review each extracted part</h2>
+            <p>Confirm that each part belongs to the shown document area. Internal IDs are hidden.</p>
+          </div>
+          <div class="review-actions">
+            <span id="reviewCount">0 approved</span>
+            <button id="approveAllButton" class="secondary-button" type="button">Approve all</button>
+            <button id="continueButton" class="primary-button" type="button" disabled>Continue</button>
+          </div>
+        </div>
+        <div id="reviewList" class="review-list"></div>
+      </section>
+
+      <section id="finalPanel" class="final-panel hidden">
+        <div class="final-toolbar">
+          <div>
+            <p class="eyebrow">Generated output</p>
+            <h2>Final document</h2>
+          </div>
+        </div>
+        <div id="finalDocument" class="final-output"></div>
+      </section>
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='ui_app.js') }}"></script>
+</body>
+</html>

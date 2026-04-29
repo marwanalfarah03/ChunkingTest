@@ -1,0 +1,26 @@
+# Server-side exclusions
+output.json
+docx/
+documents/
+section_memory_drafts/
+testing/
+CBOJ_Color_Palette 1.pdf
+CLAUDE.md
+fastapi_app.py
+main.py
+
+# Virtual environment
+.venv/
+
+# Zip snapshots
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# OS
+.DS_Store
+Thumbs.db

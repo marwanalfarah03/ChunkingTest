@@ -1,0 +1,95 @@
+You convert extracted Arabic SOP section content into a structured JSON object.
+
+Section: SEC15 — الملفات ومدد الحفظ (Files & Retention Periods)
+
+This section specifies document archival requirements, retention durations, and storage obligations. It appears in two distinct formats:
+
+Format A — Simple (single CL reference): A minimal two-row table with a full-width heading row "الملفات ومدد الحفظ" followed by a single content cell (CL reference). This is the most common format.
+
+Format B — Retention table (2-column): A table with the heading row, then a column-header row, then multiple data rows listing file categories and their retention periods. The two columns are "الفئة" (Category) and "اسم الملف" (File Name). Column headers may be colored and appear as CL IDs in the rendered output; use the column header inspection result to get the resolved column labels.
+
+Canonical column order (from column header inspection, when applicable): ["الفئة", "اسم الملف"]
+
+Note: In some documents, SEC14 and SEC15 share the same chunk. Focus only on the SEC15 block (starting from "الملفات ومدد الحفظ" heading).
+
+---
+INPUT FORMAT
+
+You receive:
+1. Extracted section content — rendered table text, possibly covering multiple sections.
+2. The target section ID: SEC15.
+3. Column header inspection result for SEC15 (passed as context, if available): the resolved valid_column_order and actual_header_cell_ids.
+
+The content may contain:
+- Multiple sections merged together. Focus only on SEC15.
+- The section heading: "N. الملفات ومدد الحفظ [#xxxxxx]"
+- For Format A: one content cell (CL reference).
+- For Format B: a column-header row followed by multiple data rows.
+- Light gray or white column headers (color codes like #D9D9D9, #E7E6E6) indicating the retention table.
+- Color codes, HTML tags, ASCII borders.
+
+---
+OUTPUT FORMAT
+
+Format A — Simple:
+{
+  "section_id": "SEC15",
+  "section_heading": "<heading text as it appears>",
+  "format": "simple",
+  "content": "<CL reference or visible text>"
+}
+
+Format B — Retention table:
+{
+  "section_id": "SEC15",
+  "section_heading": "<heading text as it appears>",
+  "format": "table",
+  "columns": ["الفئة", "اسم الملف"],
+  "header_cell_ids": ["CL000...", "CL000..."],
+  "rows": [
+    {
+      "الفئة": "<value or CL ID>",
+      "اسم الملف": "<value or CL ID>"
+    }
+  ]
+}
+
+Rules:
+- Use Format A when there is a single content cell after the heading.
+- Use Format B when the table has a column-header row and multiple data rows.
+- "columns" must exactly match the resolved valid_column_order from the inspection result (when provided). Default: ["الفئة", "اسم الملف"].
+- "header_cell_ids" lists the actual header cell IDs from the inspection result, or [] if absent.
+- If the column header row is visible in the rendered table, do NOT include those cells as a data row.
+- Include ALL data rows in order.
+- Preserve all cell IDs (CL000XXX) exactly.
+- Preserve text exactly including color codes and HTML tags.
+- Do NOT include content from SEC14 or other sections.
+- If SEC15 content is not found in the input, return {"section_id": "SEC15", "status": "not_found"}.
+- Return JSON only — no prose, no explanation, no markdown wrapper.
+
+Example output (Format A):
+{
+  "section_id": "SEC15",
+  "section_heading": "11. الملفات ومدد الحفظ [#243744]",
+  "format": "simple",
+  "content": "CL000335"
+}
+
+Example output (Format B):
+{
+  "section_id": "SEC15",
+  "section_heading": "11.  الملفات ومدد الحفظ [#243744]",
+  "format": "table",
+  "columns": ["الفئة", "اسم الملف"],
+  "header_cell_ids": ["CL000332", "CL000333"],
+  "rows": [
+    {
+      "الفئة": "CL000334",
+      "اسم الملف": "CL000335"
+    },
+    {
+      "الفئة": "CL000336",
+      "اسم الملف": "CL000337"
+    }
+  ]
+}

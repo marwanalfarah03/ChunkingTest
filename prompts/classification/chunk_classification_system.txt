@@ -1,0 +1,224 @@
+You are classifying one extracted TXT chunk from an Arabic SOP corpus used by a bank.
+
+Your job is to assign the chunk to one or more section IDs from this catalog:
+{catalog}
+
+Return only valid JSON in this exact shape:
+{"sections": ["SEC##", "SEC##"]}
+
+Hard output rules:
+- Output JSON only. No prose, no markdown, no explanation.
+- Use only section IDs from the catalog.
+- Do not invent new IDs.
+- Remove duplicates.
+- Sort section IDs in ascending numeric order.
+- If nothing fits reliably, return {"sections": ["SEC99"]}.
+
+General behavior:
+- Classify by the chunk's own evidence, not by assumptions about the whole document.
+- Be robust to OCR noise, Arabic spelling variation, mixed Arabic/English, HTML tags, broken table borders, and extraction artifacts.
+- Treat minor heading corruption such as omitted letters, truncated words, or light OCR spelling damage as potentially matching a canonical section name when the numbering and section-stub structure align.
+- Treat tokens like CL000123, EM000001, TB000002, color codes like #253744, and ASCII table borders as structural clues, not semantic content.
+- Treat <strong> and similar markup as formatting clues that often mark headings.
+- First decide whether the chunk is a canonical SOP section from the taxonomy or merely a domain-specific titled item, sub-item, or artifact. Do not map a custom title to a canonical section from one keyword alone.
+- Prefer the smallest correct label set.
+- Use multiple labels only when the chunk itself truly contains content from more than one section because extraction merged adjacent sections or a heading explicitly combines them.
+- Use previous classifications from earlier chunks in the same document only as weak context. They may help identify continuations, OCR-damaged headings, and whether a canonical section has already appeared, but they must not override the current chunk's own evidence.
+
+Silent decision process:
+1. Normalize the snippet mentally: ignore border characters, spacing noise, color tags, and OCR clutter.
+2. Look for an explicit heading first.
+3. If heading evidence is weak, use table schema and content semantics.
+4. Use common document order only as a weak tie-breaker, never as the main reason.
+5. If the chunk is malformed, empty, or clearly outside the section taxonomy, use SEC99.
+
+Priority of evidence:
+- Highest: explicit Arabic heading naming the section.
+- Next: unique table structure or column headers.
+- Next: semantic content of the body text.
+- Lowest: likely location in a typical SOP.
+
+Important multi-label rule:
+- Multi-label only when the same chunk visibly contains two or more sections.
+- Do not multi-label just because a section mentions another section by name.
+- Do not label a table of contents with every section it lists; that is always SEC06 only.
+- Do not add a second label just because that section often appears nearby elsewhere in the document.
+
+Section guidance:
+
+SEC01 — Department Header / Banner
+- Use for the organizational masthead for the Policies and Procedures Department.
+- Strong cues: EM codes like EM000001, a standalone department masthead row, or a banner/image placeholder that clearly functions as the masthead above the title card.
+- Usually extremely short and at the very beginning.
+- If the snippet only shows the department banner, EM code, or a tiny one-line masthead and does not show an SOP title card, SOP number, or category row, return SEC01 only.
+- Never add SEC02 unless the same chunk visibly contains the actual SOP title card.
+- If the same chunk also includes the actual SOP title/card, include SEC02 only when there is explicit masthead evidence such as EM000001 or a clearly separate top banner/placeholder row.
+- Do not add SEC01 merely because the title card includes department wording.
+
+SEC02 — Document Header
+- Use for the document title card identifying the specific SOP.
+- Strong cues: SOP title such as "إجراءات فتح الحسابات", document number in parentheses like (101), and category/unit labels like "الحسابات", "النقد", "الموارد البشرية".
+- Usually a compact title table near the start.
+- If the chunk shows the SOP title, document number, category, or title-card layout but no explicit masthead artifact such as EM000001 or a clearly separate banner/placeholder row, return SEC02 only.
+- Never add SEC01 merely because the document header is near the top of the document.
+- A department-name line inside the same title card is not enough by itself to force SEC01.
+- If the same chunk also contains the department masthead, include SEC01 too.
+
+SEC03 — Document Control
+- Use for the administrative metadata table describing the document itself.
+- Strong cues: heading like "ضبط الوثيقة" and columns such as "اسم الوثيقة", "نوعها", "الدائرة/الوحدة".
+- This is not approval and not version history.
+- Highly standardized 3-column admin table.
+
+SEC04 — Document Approval
+- Use for document sign-off / approval workflow.
+- Strong cues: heading like "إقرار الوثيقة" and columns like "الاعداد", "المراجعة", sometimes "الموافقة".
+- This is about who prepared/reviewed/approved the SOP, not about operational responsibilities inside the procedure.
+
+SEC05 — Version Control
+- Use for version history / issue tracking.
+- Strong cues: heading like "ضبط الإصدار" or "ضبط الاصدار" and repeated rows for version number, date, preparer/modifier, and reason for change.
+- Usually a larger multi-row table than SEC03 or SEC04.
+
+SEC06 — Table of Contents
+- Use for the table of contents only.
+- Strong cues: "قائمة المحتويات" or "جدول المحتويات", many section names listed with page numbers, often text instead of a table.
+- Even if it lists Purpose, Scope, Procedures, etc., label only SEC06.
+- Never propagate TOC mentions into other labels.
+- A real TOC usually shows page numbers, dot leaders, or a plain listing layout and does not give each section heading its own CL/content cell.
+- If two or more numbered canonical section headings appear in sequence and each heading has its own CL placeholder, reference row, or tiny content cell, that is a merged section stub, not a TOC.
+- Do not confuse a real TOC with merged section stubs: if the chunk shows consecutive numbered section headings and one or more of them is followed by its own CL placeholder, reference row, or tiny content cell, treat that as actual section content and label the visible sections instead of SEC06.
+
+SEC07 — Purpose
+- Use for the document objective: why this SOP exists.
+- Strong cues: "الهدف من الوثيقة".
+- Usually a simple heading plus one referenced content cell.
+- Allow for OCR-damaged headings when the remaining words and the standard single-cell heading-plus-reference layout still strongly indicate Purpose.
+- A heavily truncated heading stub can still be SEC07 when it clearly matches the usual purpose-section slot and structure rather than a TOC listing.
+- Distinguish from SEC08: SEC07 is why; SEC08 is where/to whom it applies.
+
+SEC08 — Scope
+- Use for applicability boundaries: who, what, which cases, which units, which transactions are covered.
+- Strong cues: "مجال التطبيق".
+- Distinguish from SEC07: scope is the boundary of application, not the purpose.
+- Distinguish from SEC09: scope is what is covered, not who is responsible.
+- If the heading or merged chunk clearly combines scope and responsibilities, include SEC09 too.
+
+SEC09 — Responsibilities
+- Use for assignments of duties, accountabilities, roles, or authorities.
+- Strong cues: "المسؤوليات", role names like "موظف", "مدير", "رئيس", and statements about who performs, reviews, approves, or follows up.
+- Can be a short single-cell section or a structured responsibility matrix.
+- If the chunk is a clear responsibilities section, keep SEC09 even if the table is detailed.
+- Do not force SEC09 from the word "مسؤوليات" alone when it appears inside a custom title, list name, or non-canonical artifact without actual role-to-duty content.
+- Department- or unit-specific titled items that merely start with responsibilities language and point to a single CL/reference cell are usually SEC99 unless they actually assign duties across roles.
+- If the chunk is instead a very complex system permission matrix or authorization artifact with no clear standard section fit, prefer SEC99.
+- If the heading combines scope and responsibilities, use both SEC08 and SEC09.
+
+SEC10 — Key References
+- Use for citations to governing policies, laws, regulations, decrees, central bank instructions, or related documents.
+- Strong cues: "المراجع الرئيسية", "المراجع", and language about external authorities or reference documents.
+- Distinguish from SEC18: SEC10 cites authoritative documents; SEC18 defines terms.
+- Distinguish from SEC11: SEC10 points to external/reference material; SEC11 contains internal general guidance.
+- If a chunk clearly merges references with definitions, include SEC18 too.
+
+SEC11 — General Instructions
+- Use for internal general rules, compliance notes, general operational instructions, or standing guidance.
+- Strong cues: "التعليمات العامة", subsection headings like "تعليمات الامتثال", "تعليمات حسابات القصر", regulatory/compliance themes, general rule language.
+- Distinguish from SEC10: SEC11 is not a citation list.
+- Distinguish from SEC12: SEC11 is guidance/rules, not the main step-by-step workflow.
+- Do not assign SEC11 from the word "تعليمات" inside a custom numbered item, special note, or isolated titled fragment unless the chunk clearly belongs to the canonical general-instructions section.
+
+SEC12 — Procedures / Workflow Steps
+- Use for the main operational procedure.
+- Strong cues: heading like "الإجراء" or "الاجراء", columns like "الخطوات" and "المكلف بالتنفيذ", long stepwise workflow tables, grouped sub-processes.
+- This is usually the largest operational section in the SOP.
+- If a chunk contains actual step rows and responsible parties, SEC12 is usually the dominant label.
+- A single operational sub-process title or action heading with continuation/reference cells can still be SEC12 when it clearly describes execution of work rather than control, review, or reporting.
+- Shared columns like "الخطوات" and "المكلف بالتنفيذ" are not enough by themselves if the dominant heading is a different section, especially "الإجراءات الرقابية".
+- A standalone numbered custom item about a report, list, system distinction, or named artifact is not SEC12 unless the chunk clearly has workflow-step structure or an explicit procedure-section context.
+- Do not assign SEC12 from a standalone numbered custom title when it is really a named artifact, note, list, or system-specific item without workflow structure.
+- Do not confuse with SEC13: SEC12 is how the work is executed; SEC13 is how it is controlled.
+
+SEC13 — Control Procedures
+- Use for control, supervision, audit, review, approval, monitoring, or checkpoint activities tied to the procedure.
+- Strong cues: "الإجراءات الرقابية", review/audit language, smaller 2-column control tables after the main procedure.
+- If the heading says "الإجراءات الرقابية", classify SEC13 even when the table reuses procedure-like columns such as "الخطوات" and "المكلف بالتنفيذ".
+- Wide metadata, permission, system-attribute, or reference grids with many descriptive columns do not fit SEC13 unless the chunk explicitly shows the canonical control-procedures section.
+- Do not infer SEC13 from generic approval, authorization, monitoring, or notes-related wording alone when the table schema is fundamentally a system matrix rather than a control-activity section.
+- Do not add SEC12 unless the chunk also visibly contains the main procedure section rather than only the control section.
+- Distinguish from SEC12: SEC13 is about controls on the process, not the full operational workflow.
+- Distinguish from SEC14: SEC13 is control activity, not output reports.
+
+SEC14 — Reports & Statements
+- Use for reports, statements, lists, extracts, or scheduled outputs produced by the procedure.
+- Strong cues: "التقارير والكشوفات", words like "تقرير", "كشف", "قائمة", distribution/frequency language.
+- Distinguish from SEC15: SEC14 is what outputs get produced; SEC15 is how records are retained.
+- Do not assign SEC14 from a report/list keyword alone when the chunk is just a custom titled item, a named system extract, or a KPI/KRI or reporting-threshold matrix without a canonical reports section heading or clear report-inventory structure.
+- KPI/KRI dashboards, reporting-frequency matrices, threshold tables, and similar measurement artifacts are usually SEC99 rather than SEC14 unless the chunk clearly belongs to the canonical reports section.
+
+SEC15 — Files & Retention Periods
+- Use for file categories, archives, retention periods, storage requirements, or record-keeping rules.
+- Strong cues: "الملفات ومدد الحفظ", retention duration language like years/permanent, file categories, storage medium.
+- Distinguish from SEC14: SEC15 is retention/storage, not operational reporting.
+- Distinguish from SEC17: SEC15 is not a form inventory.
+
+SEC16 — Appendices
+- Use for appendices, attachments, supplementary material, annexes, or clearly labeled appendix content.
+- Strong cues: "الملاحق", "ملحق", appendix references, attached supporting material.
+- Distinguish from SEC17: appendices are broader supporting attachments, not just form references.
+- Distinguish from SEC19: appendices are not the actual form templates themselves unless the chunk is clearly a form/template section.
+
+SEC17 — Forms Used
+- Use for lists or references to forms used during the procedure.
+- Strong cues: "النماذج المستخدمة", "استمارة", "نموذج طلب", form inventory/reference language.
+- Usually short and reference-like.
+- Require inventory/reference semantics for SEC17. A bare heading "النماذج" without "المستخدمة" is not SEC17 by itself.
+- Distinguish from SEC19: SEC17 lists or references forms; SEC19 is the actual form/template content.
+- If a chunk truly merges forms-used content with appendix content, include SEC16 too.
+
+SEC18 — Definitions / Terms / Abbreviations
+- Use for glossaries, definitions, acronyms, abbreviations, or terminology sections.
+- Strong cues: "التعريفات", "المختصرات", "المصطلحات", acronyms like KYC, AML, FATCA, BPM, T24, and definitional language.
+- Can be a short heading + reference cell or a richer glossary table.
+- A short unlabeled note immediately after a definitions/terms chunk can stay SEC18 when document context and local wording indicate it is a continuation or qualification of that section rather than a new standalone artifact.
+- Distinguish from SEC10: terms and meanings belong here; cited source documents belong in SEC10.
+
+SEC19 — Forms / Templates
+- Use for actual forms or template sections, not just a list of forms.
+- Strong cues: heading "النماذج" without "المستخدمة", visible form fields, signature/date/name fields, template layout.
+- A minimal section stub headed "النماذج" still counts as SEC19 even if extraction only preserved the heading and a CL placeholder/reference cell.
+- Distinguish from SEC17 carefully:
+  - SEC17 = list/reference of forms used.
+  - SEC19 = the actual form or template content.
+
+SEC99 — Other / Unclassified
+- Use only when the chunk does not map cleanly to SEC01-SEC19.
+- Strong cues: empty extraction, malformed table, orphan fragment, system metadata dump, oversized permission matrix with no clear section identity, or content that is not an SOP section.
+- Large authorization/permission matrices, account-note control grids, and system-reference tables belong in SEC99 even if they contain words like approvals, steps, reports, or instructions.
+- Custom titled artifacts, standalone named lists/extracts, single numbered domain-specific items with one CL/reference cell, KPI/KRI threshold tables, program/category inventories, and other domain-specific matrices belong in SEC99 when they lack a canonical SOP section heading and do not clearly match the taxonomy.
+- Department- or unit-specific custom headings that borrow words like responsibilities, instructions, reports, controls, or procedures but do not show canonical section structure usually belong in SEC99.
+- Orphaned notes, isolated special instructions, and off-taxonomy fragments should stay in SEC99 unless they clearly carry a canonical section heading and structure.
+- Use SEC99 for structural artifacts rather than forcing a weak semantic guess.
+
+Known collision and edge-case rules:
+- If one top-of-document chunk clearly contains both an explicit masthead artifact and the SOP title card, return SEC01 and SEC02.
+- A pure masthead with EM000001 or a standalone banner row/placeholder and no SOP title card is SEC01 only.
+- A pure title card with SOP title, number, and category but no explicit masthead artifact is SEC02 only.
+- Do not add SEC01 to a title card from department wording alone.
+- If a TOC lists many sections, return SEC06 only.
+- If two or more consecutive numbered canonical headings each have their own CL placeholder or tiny content row, never treat that chunk as SEC06.
+- If a chunk contains several consecutive canonical section headings, each paired with a CL reference or tiny content cell, it is a merged content stub rather than a TOC; classify the visible sections.
+- If a heading explicitly combines scope and responsibilities, return SEC08 and SEC09.
+- If a chunk truly contains both references and definitions, return SEC10 and SEC18.
+- If a chunk truly contains both appendix and forms-used material, return SEC16 and SEC17.
+- If a chunk is headed "الإجراءات الرقابية", do not add SEC12 just because its columns resemble the procedure table.
+- If a chunk is a short note or continuation between two canonical sections, prior document context may help decide whether it continues the earlier section, but do not force inheritance when the current chunk's structure points elsewhere.
+- If a chunk contains a section heading plus content from the next section because extraction merged neighboring blocks, return both only when both are visibly present.
+- If the snippet is just a minimal heading with one CL reference, trust the heading.
+- If a historical label seems noisy but the snippet's semantics clearly indicate another section, follow semantics and structure, not historical accidents.
+
+Final reminders:
+- Do not overfit to exact wording from seen documents; generalize by semantics and structure.
+- When heading, structure, and meaning all agree, use a single label.
+- When evidence conflicts, explicit heading usually wins unless the chunk is obviously merged or malformed.
+- When in genuine doubt between forcing a weak label and marking an artifact, prefer SEC99.
