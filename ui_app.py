@@ -1,12 +1,14 @@
 ﻿from __future__ import annotations
 
 import json
+import io
 import os
 import re
 import sys
 import threading
 import time
 import traceback
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from html import escape
@@ -24,6 +26,7 @@ if str(SRC_DIR) not in sys.path:
 import chunking
 import classification
 import header_inspection
+import rag_txt_export
 import section_json_extraction
 
 DOCUMENTS_ROOT = PROJECT_ROOT / "documents"
@@ -1182,6 +1185,29 @@ def build_renderer(job: UiJob) -> DocumentRenderer:
     )
 
 
+def export_job_rag_txt(job: UiJob) -> dict[str, Any]:
+    if job.section_json_payload is None:
+        raise PipelineError("The final document is not ready yet.")
+    table_map: dict[str, Any] = {}
+    cell_map: dict[str, Any] = {}
+    asset_map: dict[str, Any] = {}
+    if job.artifact_dir is not None:
+        try:
+            table_map, cell_map, asset_map = load_artifact_maps(job.artifact_dir)
+        except FileNotFoundError:
+            # Still export useful RAG files from the structured JSON if the
+            # artifact maps are unavailable; unresolved CL/TB/EM tokens are
+            # recorded in chunk metadata.
+            table_map, cell_map, asset_map = {}, {}, {}
+    return rag_txt_export.export_rag_txt_files(
+        section_json_payload=job.section_json_payload,
+        output_dir=job.document_path / "rag_txt",
+        table_map=table_map,
+        cell_map=cell_map,
+        asset_map=asset_map,
+    )
+
+
 def build_review_items(job: UiJob, classification_payload: dict[str, Any]) -> list[dict[str, Any]]:
     renderer = build_renderer(job)
     results = classification_payload.get("results") or []
@@ -1567,6 +1593,46 @@ def api_download() -> Response:
     return Response(
         data,
         mimetype="application/json",
+        headers={"Content-Disposition": content_disposition},
+    )
+
+
+@app.get("/api/download-rag-txt")
+def api_download_rag_txt() -> Response:
+    with _jobs_lock:
+        job = _jobs.get(_active_job_id or "")
+    if job is None or job.section_json_payload is None:
+        return jsonify({"error": "The final document is not ready yet."}), 404
+    try:
+        manifest = export_job_rag_txt(job)
+    except FileNotFoundError as exc:
+        return jsonify({"error": f"TXT export artifacts are missing: {repair_text(exc)}"}), 404
+    if int(manifest.get("chunk_count") or 0) == 0:
+        return jsonify({"error": "No SEC11, SEC12, or SEC13 chunks were available for TXT export."}), 404
+
+    output_dir = Path(str(manifest["output_dir"]))
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for chunk in manifest.get("chunks") or []:
+            file_path = Path(str(chunk.get("file_path") or ""))
+            if file_path.exists() and file_path.is_file():
+                archive.write(file_path, arcname=file_path.name)
+        manifest_path = output_dir / "manifest.json"
+        if manifest_path.exists():
+            archive.write(manifest_path, arcname=manifest_path.name)
+    zip_buffer.seek(0)
+
+    raw_name = re.sub(r'\s+', ' ', job.display_name).strip() or "document"
+    filename = f"{raw_name}_rag_txt.zip"
+    ascii_filename = re.sub(r'[^\x20-\x7e]', '_', filename)
+    encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+    content_disposition = (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{encoded_filename}"
+    )
+    return Response(
+        zip_buffer.getvalue(),
+        mimetype="application/zip",
         headers={"Content-Disposition": content_disposition},
     )
 

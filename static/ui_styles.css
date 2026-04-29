@@ -258,6 +258,13 @@ button { cursor: pointer; }
   background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.82));
   backdrop-filter: blur(8px);
 }
+.download-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .review-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 #reviewCount { font-weight: 900; color: var(--cbo-blue); }
 .review-list { display: grid; gap: 18px; }
@@ -531,6 +538,9 @@ th > .rich-text,
   .hero-panel, .status-panel, .review-panel, .final-panel { padding: 20px; border-radius: 22px; }
   .hero-copy h2 { font-size: 42px; }
   .review-toolbar, .review-card-header, .review-card-footer { flex-direction: column; align-items: stretch; }
+  .final-toolbar { flex-direction: column; align-items: stretch; }
+  .download-actions { justify-content: stretch; }
+  .download-actions button { flex: 1 1 190px; }
   .area-grid { grid-template-columns: 1fr; }
   .doc-table, .workflow-table { min-width: 680px; }
 }

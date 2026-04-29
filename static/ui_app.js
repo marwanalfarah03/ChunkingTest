@@ -29,6 +29,7 @@ const approveAllButton = el('approveAllButton');
 const continueButton = el('continueButton');
 const finalDocument = el('finalDocument');
 const downloadButton = el('downloadButton');
+const downloadTxtButton = el('downloadTxtButton');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -294,6 +295,10 @@ uploadForm.addEventListener('submit', async (event) => {
 
 downloadButton.addEventListener('click', () => {
   window.location.href = '/api/download';
+});
+
+downloadTxtButton.addEventListener('click', () => {
+  window.location.href = '/api/download-rag-txt';
 });
 
 fetch('/api/state').then((response) => response.json()).then(applySnapshot).finally(startEvents);
