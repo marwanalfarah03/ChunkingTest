@@ -350,6 +350,35 @@ button { cursor: pointer; }
   line-height: 1.35;
   unicode-bidi: isolate;
 }
+.collapsible-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  user-select: none;
+}
+.collapsible-summary::-webkit-details-marker { display: none; }
+.collapsible-summary::marker { content: ""; }
+.summary-label { flex: 1 1 auto; min-width: 0; }
+.collapse-marker {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-inline-end: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .16s ease;
+  opacity: .82;
+}
+details[open] > .collapsible-summary > .collapse-marker { transform: rotate(45deg); }
+.section-summary { margin: 0; }
+.section-collapsible-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
 .content-card {
   padding: 17px 18px;
   border-radius: 18px;
@@ -375,16 +404,56 @@ button { cursor: pointer; }
   background: var(--section-color, rgba(0,147,201,.12));
   unicode-bidi: isolate;
 }
+.hierarchy-list {
+  display: grid;
+  gap: 12px;
+}
+.hierarchy-node-body {
+  display: grid;
+  gap: 10px;
+  margin-inline-start: 18px;
+  padding: 12px 0 2px 16px;
+  border-inline-start: 3px solid color-mix(in srgb, var(--section-color, var(--cbo-sky)) 26%, white);
+}
+.hierarchy-subsection-summary {
+  padding: 12px 14px;
+  border-radius: 14px;
+  color: var(--section-text, var(--cbo-blue));
+  background: var(--section-color, rgba(0,147,201,.12));
+  font-weight: 950;
+  line-height: 1.45;
+  unicode-bidi: isolate;
+}
 .workflow-view { display: grid; gap: 14px; }
-.workflow-group, .workflow-subgroup {
+.workflow-group,
+.workflow-subgroup,
+.workflow-group-summary,
+.workflow-subgroup-summary {
   padding: 14px 16px;
   border-radius: 16px;
   font-weight: 950;
   line-height: 1.5;
   unicode-bidi: isolate;
 }
-.workflow-group { color: var(--group-text, white); background: var(--group-color, var(--cbo-blue)); }
-.workflow-subgroup { color: var(--group-text, var(--cbo-blue)); background: color-mix(in srgb, var(--group-color, var(--cbo-sky)) 16%, white); border: 1px solid color-mix(in srgb, var(--group-color, var(--cbo-sky)) 34%, white); }
+.workflow-group,
+.workflow-group-summary {
+  color: var(--group-text, white);
+  background: var(--group-color, var(--cbo-blue));
+}
+.workflow-subgroup,
+.workflow-subgroup-summary {
+  color: var(--group-text, var(--cbo-blue));
+  background: color-mix(in srgb, var(--group-color, var(--cbo-sky)) 16%, white);
+  border: 1px solid color-mix(in srgb, var(--group-color, var(--cbo-sky)) 34%, white);
+}
+.workflow-node-body {
+  display: grid;
+  gap: 12px;
+  margin-inline-start: 18px;
+  padding: 12px 0 2px 16px;
+  border-inline-start: 3px solid color-mix(in srgb, var(--group-color, var(--cbo-sky)) 28%, white);
+}
+.workflow-subgroup-node { margin-inline-start: 10px; }
 
 .table-scroll { width: 100%; overflow: auto; border-radius: 16px; border: 1px solid var(--line); background: white; margin: 10px 0; }
 .doc-table, .workflow-table {

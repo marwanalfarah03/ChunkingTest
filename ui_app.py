@@ -390,6 +390,39 @@ class DocumentRenderer:
         direction = dominant_direction(label)
         return f'<h2 class="section-title text-{direction}" dir="{direction}"{style}>{self.render_inline_text(label)}</h2>'
 
+    def render_section_summary(self, value: Any, fallback: str) -> str:
+        label, color = extract_display_color(value or fallback)
+        if not label:
+            label = fallback
+        style = ""
+        if color:
+            style = f' style="--section-color: {color}; --section-text: {color_text(color)}"'
+        direction = dominant_direction(label)
+        return (
+            f'<summary class="section-title section-summary collapsible-summary text-{direction}" '
+            f'dir="{direction}"{style}><span class="collapse-marker" aria-hidden="true"></span>'
+            f'<span class="summary-label">{self.render_inline_text(label)}</span></summary>'
+        )
+
+    def render_section_article(
+        self,
+        section_id: str,
+        heading: Any,
+        fallback_heading: str,
+        body: str,
+        *,
+        collapsible: bool = False,
+    ) -> str:
+        if not collapsible:
+            return '<article class="final-section">' f'{self.render_heading(heading, fallback_heading)}' f'{body}</article>'
+        return (
+            f'<article class="final-section final-section-collapsible" data-section-id="{escape(section_id)}">'
+            '<details class="collapsible-node section-node" open>'
+            f'{self.render_section_summary(heading, fallback_heading)}'
+            f'<div class="section-collapsible-body">{body}</div>'
+            '</details></article>'
+        )
+
     def render_content_card(self, value: Any, label: str | None = None, nested: bool = False) -> str:
         label_html = f'<div class="content-label">{escape(label)}</div>' if label else ""
         nested_class = " nested-content" if nested else ""
@@ -452,34 +485,48 @@ class DocumentRenderer:
         return "".join(html)
 
     def render_hierarchy_entries(self, entries: list[Any]) -> str:
-        html: list[str] = ['<div class="hierarchy-list">']
-        inside_subsection = False
+        html: list[str] = ['<div class="hierarchy-list hierarchy-collapsible">']
+        subsection_open = False
+
+        def close_subsection() -> None:
+            nonlocal subsection_open
+            if subsection_open:
+                html.append("</div></details>")
+                subsection_open = False
+
         for entry in entries:
             if not isinstance(entry, dict):
-                html.append(self.render_content_card(entry))
+                html.append(self.render_content_card(entry, nested=subsection_open))
                 continue
             entry_type = entry.get("type")
             if entry_type == "subsection":
-                inside_subsection = True
+                close_subsection()
                 heading = entry.get("heading") or "Subsection"
                 heading_label, heading_color = extract_display_color(heading)
-                style = f' style="--section-color: {heading_color}; --section-text: {color_text(heading_color)}"' if heading_color else ""
-                html.append(f'<section class="subsection-block"{style}>')
+                style = (
+                    f' style="--section-color: {heading_color}; --section-text: {color_text(heading_color)}"'
+                    if heading_color
+                    else ""
+                )
                 heading_direction = dominant_direction(heading_label)
                 html.append(
-                    f'<h3 class="text-{heading_direction}" dir="{heading_direction}">'
-                    f'{self.render_inline_text(heading_label)}</h3>'
+                    f'<details class="collapsible-node hierarchy-node hierarchy-subsection-node" open{style}>'
+                    f'<summary class="collapsible-summary hierarchy-subsection-summary text-{heading_direction}" '
+                    f'dir="{heading_direction}"><span class="collapse-marker" aria-hidden="true"></span>'
+                    f'<span class="summary-label">{self.render_inline_text(heading_label)}</span></summary>'
+                    '<div class="collapsible-body hierarchy-node-body">'
                 )
                 if "value" in entry:
                     html.append(self.render_content_card(entry.get("value"), nested=True))
                 for value in entry.get("values") or []:
                     html.append(self.render_content_card(value, nested=True))
-                html.append("</section>")
+                subsection_open = True
             elif entry_type == "content":
-                html.append(self.render_content_card(entry.get("value"), nested=inside_subsection))
+                html.append(self.render_content_card(entry.get("value"), nested=subsection_open))
             else:
                 label = repair_text(entry_type or "Item")
-                html.append(self.render_content_card(entry.get("value") or entry, label=label))
+                html.append(self.render_content_card(entry.get("value") or entry, label=label, nested=subsection_open))
+        close_subsection()
         html.append("</div>")
         return "".join(html)
 
@@ -497,14 +544,48 @@ class DocumentRenderer:
     def render_workflow_entries(self, data: dict[str, Any]) -> str:
         entries = data.get("entries") or []
         columns = self.workflow_columns(data, entries)
-        html: list[str] = ['<div class="workflow-view">']
+        html: list[str] = ['<div class="workflow-view workflow-collapsible">']
         table_open = False
+        group_open = False
+        subgroup_open = False
 
         def close_table() -> None:
             nonlocal table_open
             if table_open:
                 html.append("</tbody></table></div>")
                 table_open = False
+
+        def open_node(kind: str, heading: Any) -> None:
+            heading_label, heading_color = extract_display_color(heading or "")
+            style = (
+                f' style="--group-color: {heading_color}; --group-text: {color_text(heading_color)}"'
+                if heading_color
+                else ""
+            )
+            heading_direction = dominant_direction(heading_label)
+            node_class = "workflow-group-node" if kind == "group" else "workflow-subgroup-node"
+            summary_class = "workflow-group-summary" if kind == "group" else "workflow-subgroup-summary"
+            html.append(
+                f'<details class="collapsible-node workflow-node {node_class}" open{style}>'
+                f'<summary class="collapsible-summary {summary_class} text-{heading_direction}" '
+                f'dir="{heading_direction}"><span class="collapse-marker" aria-hidden="true"></span>'
+                f'<span class="summary-label">{self.render_inline_text(heading_label)}</span></summary>'
+                '<div class="collapsible-body workflow-node-body">'
+            )
+
+        def close_subgroup() -> None:
+            nonlocal subgroup_open
+            close_table()
+            if subgroup_open:
+                html.append("</div></details>")
+                subgroup_open = False
+
+        def close_group() -> None:
+            nonlocal group_open
+            close_subgroup()
+            if group_open:
+                html.append("</div></details>")
+                group_open = False
 
         def open_table() -> None:
             nonlocal table_open
@@ -529,23 +610,13 @@ class DocumentRenderer:
                 continue
             entry_type = entry.get("type")
             if entry_type == "group_header":
-                close_table()
-                heading, color = extract_display_color(entry.get("heading") or "")
-                style = f' style="--group-color: {color}; --group-text: {color_text(color)}"' if color else ""
-                heading_direction = dominant_direction(heading)
-                html.append(
-                    f'<div class="workflow-group text-{heading_direction}" dir="{heading_direction}"{style}>'
-                    f'{self.render_inline_text(heading)}</div>'
-                )
+                close_group()
+                open_node("group", entry.get("heading"))
+                group_open = True
             elif entry_type == "subgroup_header":
-                close_table()
-                heading, color = extract_display_color(entry.get("heading") or "")
-                style = f' style="--group-color: {color}; --group-text: {color_text(color)}"' if color else ""
-                heading_direction = dominant_direction(heading)
-                html.append(
-                    f'<div class="workflow-subgroup text-{heading_direction}" dir="{heading_direction}"{style}>'
-                    f'{self.render_inline_text(heading)}</div>'
-                )
+                close_subgroup()
+                open_node("subgroup", entry.get("heading"))
+                subgroup_open = True
             elif entry_type == "content":
                 close_table()
                 html.append(self.render_content_card(entry.get("value")))
@@ -572,6 +643,10 @@ class DocumentRenderer:
             else:
                 close_table()
                 html.append(self.render_content_card(entry))
+        if group_open:
+            close_group()
+        else:
+            close_subgroup()
         close_table()
         html.append("</div>")
         return "".join(html)
@@ -625,15 +700,21 @@ class DocumentRenderer:
             body = "".join(self.render_sec99_item(item) for item in payload if isinstance(item, dict))
             if not body:
                 body = '<div class="empty-document">No displayable content was produced for this section.</div>'
-            return '<article class="final-section">' f'{self.render_heading(fallback_heading, fallback_heading)}' f'{body}</article>'
+            return self.render_section_article(section_id, fallback_heading, fallback_heading, body)
         if not isinstance(payload, dict):
-            return '<article class="final-section">' f'{self.render_heading(fallback_heading, fallback_heading)}' f'{self.render_content_card(payload)}</article>'
+            return self.render_section_article(
+                section_id,
+                fallback_heading,
+                fallback_heading,
+                self.render_content_card(payload),
+            )
         if payload.get("status") == "not_found":
             return ""
         heading = payload.get("section_heading") or fallback_heading
         entries = payload.get("entries")
         rows = payload.get("rows")
         columns = payload.get("columns")
+        has_hierarchy_entries = isinstance(entries, list) and section_id in {"SEC11", "SEC12", "SEC13"}
         if isinstance(entries, list) and any(isinstance(item, dict) and item.get("type") in {"group_header", "subgroup_header", "step"} for item in entries):
             body = self.render_workflow_entries(payload)
         elif isinstance(entries, list):
@@ -646,7 +727,13 @@ class DocumentRenderer:
             body = self.render_content_card(payload.get("content"))
         else:
             body = self.render_generic_value(payload)
-        return '<article class="final-section">' f'{self.render_heading(heading, fallback_heading)}' f'{body}</article>'
+        return self.render_section_article(
+            section_id,
+            heading,
+            fallback_heading,
+            body,
+            collapsible=has_hierarchy_entries,
+        )
 
     def table_ids_for_chunk_names(self, chunk_names: list[str]) -> list[str]:
         chunk_lookup: dict[str, str] = {}
