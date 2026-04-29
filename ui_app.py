@@ -1608,7 +1608,7 @@ def api_download_rag_txt() -> Response:
     except FileNotFoundError as exc:
         return jsonify({"error": f"TXT export artifacts are missing: {repair_text(exc)}"}), 404
     if int(manifest.get("chunk_count") or 0) == 0:
-        return jsonify({"error": "No SEC11, SEC12, or SEC13 chunks were available for TXT export."}), 404
+        return jsonify({"error": "No resolved sections were available for TXT export."}), 404
 
     output_dir = Path(str(manifest["output_dir"]))
     zip_buffer = io.BytesIO()

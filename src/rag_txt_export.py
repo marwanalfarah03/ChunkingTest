@@ -8,18 +8,46 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_RAG_SECTION_IDS = {"SEC11", "SEC12", "SEC13"}
-
 SECTION_FILE_PREFIX = {
+    "SEC02": "document_header",
+    "SEC03": "document_control",
+    "SEC04": "document_approval",
+    "SEC05": "version_control",
+    "SEC07": "purpose",
+    "SEC08": "scope",
+    "SEC09": "responsibilities",
+    "SEC10": "key_references",
     "SEC11": "general_instruction",
     "SEC12": "procedure",
     "SEC13": "control_procedure",
+    "SEC14": "reports_statements",
+    "SEC15": "files_retention_periods",
+    "SEC16": "appendices",
+    "SEC17": "forms_used",
+    "SEC18": "definitions_terms_abbreviations",
+    "SEC19": "forms_templates",
+    "SEC99": "other",
 }
 
 SECTION_ENGLISH = {
+    "SEC02": "Document Header",
+    "SEC03": "Document Control",
+    "SEC04": "Document Approval",
+    "SEC05": "Version Control",
+    "SEC07": "Purpose",
+    "SEC08": "Scope",
+    "SEC09": "Responsibilities",
+    "SEC10": "Key References",
     "SEC11": "General Instructions",
     "SEC12": "Procedures / Workflow Steps",
     "SEC13": "Control Procedures",
+    "SEC14": "Reports & Statements",
+    "SEC15": "Files & Retention Periods",
+    "SEC16": "Appendices",
+    "SEC17": "Forms Used",
+    "SEC18": "Definitions / Terms / Abbreviations",
+    "SEC19": "Forms / Templates",
+    "SEC99": "Other / Unclassified",
 }
 
 CL_TOKEN_RE = re.compile(r"CL\d{6}")
@@ -86,6 +114,21 @@ def safe_filename_part(value: str) -> str:
     cleaned = re.sub(r"\s+", "_", cleaned).strip(" ._")
     cleaned = re.sub(r"_+", "_", cleaned)
     return cleaned or "chunk"
+
+
+def slugify(value: str) -> str:
+    cleaned = repair_text(value).replace("&", " and ")
+    cleaned = re.sub(r"[/\\]+", " ", cleaned)
+    cleaned = re.sub(r"[^0-9A-Za-z]+", "_", cleaned).strip("_").lower()
+    return re.sub(r"_+", "_", cleaned) or "section"
+
+
+def section_file_prefix(section_id: str, section_english: str) -> str:
+    return SECTION_FILE_PREFIX.get(section_id) or slugify(section_english or section_id)
+
+
+def strip_document_run_suffix(document_name: str) -> str:
+    return re.sub(r"(?:[_\s-]+)?\d{8}_\d{6}(?:_\d+)?$", "", repair_text(document_name)).strip(" _-")
 
 
 def find_sop_code(document_name: str) -> str | None:
@@ -294,16 +337,28 @@ def build_hierarchy_path(hierarchy: list[dict[str, Any]]) -> str:
     return " > ".join(labels)
 
 
+def format_number_path(indices: list[int]) -> str:
+    return "_".join(f"{max(0, index):02d}" for index in indices)
+
+
+def next_order_prefix(order_state: dict[str, int]) -> str:
+    order_state["value"] = int(order_state.get("value") or 0) + 1
+    return f"{order_state['value']:04d}"
+
+
 def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, str]]) -> str:
+    section_parts = [
+        str(metadata.get("section_arabic") or "").strip(),
+        str(metadata.get("section_english") or "").strip(),
+    ]
+    section_label = " - ".join(part for part in section_parts if part)
     content_lines = [
         f"Document: {metadata.get('document_name', '')}",
-        f"Section: {metadata.get('section_id', '')} - {metadata.get('section_english', '')}",
+        f"Section: {section_label}",
+        f"Hierarchy: {metadata.get('hierarchy_path', '')}",
+        f"Chunk type: {metadata.get('chunk_type', '')}",
+        "",
     ]
-    hierarchy_path = metadata.get("hierarchy_path")
-    if hierarchy_path:
-        content_lines.append(f"Hierarchy: {hierarchy_path}")
-    content_lines.append(f"Chunk type: {metadata.get('chunk_type', '')}")
-    content_lines.append("")
 
     for label, value in content_blocks:
         clean_label = plain_label(label)
@@ -317,13 +372,7 @@ def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, s
 
     content = normalize_text("\n".join(content_lines))
     metadata["content_character_count"] = len(content)
-    return (
-        "--- RAG_METADATA_JSON ---\n"
-        + json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True)
-        + "\n--- END_RAG_METADATA_JSON ---\n\n"
-        + content
-        + "\n"
-    )
+    return content + "\n"
 
 
 def base_metadata(
@@ -339,7 +388,8 @@ def base_metadata(
     resolved_values: list[ResolvedValue],
 ) -> dict[str, Any]:
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    document_name = repair_text(summary.get("document_name") or result.get("document_name") or "")
+    original_document_name = repair_text(summary.get("document_name") or result.get("document_name") or "")
+    document_name = strip_document_run_suffix(original_document_name)
     section_heading = plain_label(section_json.get("section_heading") or "")
     if not section_heading:
         section_heading = SECTION_ENGLISH.get(section_id, section_id)
@@ -354,6 +404,7 @@ def base_metadata(
         "chunk_id": Path(output_file_name).stem,
         "chunk_type": chunk_type,
         "document_name": document_name,
+        "original_document_name": original_document_name,
         "document_path": repair_text(summary.get("document_path") or ""),
         "document_sop_code": find_sop_code(document_name),
         "run_timestamp_utc": repair_text(summary.get("run_timestamp_utc") or ""),
@@ -410,6 +461,10 @@ def unique_file_name(candidate: str, used_names: set[str]) -> str:
         counter += 1
 
 
+def ordered_file_name(base_name: str, *, order_state: dict[str, int], used_names: set[str]) -> str:
+    return unique_file_name(f"{next_order_prefix(order_state)}_{base_name}", used_names)
+
+
 def section_hierarchy(document_name: str, section_id: str, section_heading: str) -> list[dict[str, Any]]:
     return [
         {"level": 0, "type": "document", "title": document_name},
@@ -422,6 +477,90 @@ def section_hierarchy(document_name: str, section_id: str, section_heading: str)
     ]
 
 
+def merge_sources(items: list[ResolvedValue], *, text: str = "") -> ResolvedValue:
+    merged = ResolvedValue(text=normalize_text(text))
+    for item in items:
+        merged.cell_ids.update(item.cell_ids)
+        merged.table_ids.update(item.table_ids)
+        merged.asset_ids.update(item.asset_ids)
+        merged.unresolved_refs.update(item.unresolved_refs)
+    return merged
+
+
+def resolve_rows_text(rows: list[Any], columns: list[str], resolver: PlainTextResolver) -> ResolvedValue:
+    lines: list[str] = []
+    resolved_items: list[ResolvedValue] = []
+    for row_index, row in enumerate(rows, start=1):
+        row_lines: list[str] = [f"Row {row_index}:"]
+        if isinstance(row, dict):
+            row_columns = columns or [plain_label(key) for key in row if key != "type"]
+            if isinstance(row.get("cells"), list):
+                for cell_index, cell in enumerate(row["cells"], start=1):
+                    label = row_columns[cell_index - 1] if cell_index <= len(row_columns) else f"Column {cell_index}"
+                    resolved = resolver.resolve(cell)
+                    resolved_items.append(resolved)
+                    if resolved.text:
+                        row_lines.append(f"{label}: {resolved.text}")
+            else:
+                for key in [key for key in row if key != "type"]:
+                    label = plain_label(key)
+                    resolved = resolver.resolve(row.get(key))
+                    resolved_items.append(resolved)
+                    if resolved.text:
+                        row_lines.append(f"{label}: {resolved.text}")
+        elif isinstance(row, list):
+            for cell_index, cell in enumerate(row, start=1):
+                label = columns[cell_index - 1] if cell_index <= len(columns) else f"Column {cell_index}"
+                resolved = resolver.resolve(cell)
+                resolved_items.append(resolved)
+                if resolved.text:
+                    row_lines.append(f"{label}: {resolved.text}")
+        else:
+            resolved = resolver.resolve(row)
+            resolved_items.append(resolved)
+            if resolved.text:
+                row_lines.append(resolved.text)
+        if len(row_lines) > 1:
+            lines.extend(row_lines)
+            lines.append("")
+    return merge_sources(resolved_items, text="\n".join(lines))
+
+
+def resolve_section_content(section_payload: Any, resolver: PlainTextResolver) -> tuple[list[tuple[str, str]], list[ResolvedValue]]:
+    if isinstance(section_payload, list):
+        resolved = resolver.resolve(section_payload)
+        return [("Content", resolved.text)] if resolved.text else [], [resolved]
+    if not isinstance(section_payload, dict):
+        resolved = resolver.resolve(section_payload)
+        return [("Content", resolved.text)] if resolved.text else [], [resolved]
+
+    blocks: list[tuple[str, str]] = []
+    resolved_values: list[ResolvedValue] = []
+    if "content" in section_payload:
+        resolved = resolver.resolve(section_payload.get("content"))
+        resolved_values.append(resolved)
+        if resolved.text:
+            blocks.append(("Content", resolved.text))
+
+    columns = [plain_label(column) for column in list_value(section_payload.get("columns"))]
+    rows = section_payload.get("rows")
+    if isinstance(rows, list):
+        resolved = resolve_rows_text(rows, columns, resolver)
+        resolved_values.append(resolved)
+        if resolved.text:
+            blocks.append(("Rows", resolved.text))
+
+    skipped = {"section_id", "section_heading", "columns", "header_cell_ids", "format", "status", "content", "rows"}
+    for key, value in section_payload.items():
+        if key in skipped:
+            continue
+        resolved = resolver.resolve(value)
+        resolved_values.append(resolved)
+        if resolved.text:
+            blocks.append((plain_label(key), resolved.text))
+    return blocks, resolved_values
+
+
 def export_workflow_entries(
     *,
     output_dir: Path,
@@ -430,36 +569,50 @@ def export_workflow_entries(
     section_json: dict[str, Any],
     resolver: PlainTextResolver,
     used_names: set[str],
+    order_state: dict[str, int],
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
-    prefix = SECTION_FILE_PREFIX.get(section_id, section_id.lower())
+    section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
+    prefix = section_file_prefix(section_id, section_english)
     entries = section_json.get("entries") if isinstance(section_json.get("entries"), list) else []
     columns = workflow_columns(section_json, entries)
     chunks: list[dict[str, Any]] = []
-    document_name = repair_text((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
+    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
-    group_index = 0
-    subgroup_index = 0
+    header_levels = {
+        "group_header": 1,
+        "subgroup_header": 2,
+        "sub_subgroup_header": 3,
+        "subsubgroup_header": 3,
+    }
+    level_counters: list[int] = []
+    active_indices: list[int] = []
+    active_headers: list[dict[str, Any]] = []
     item_index = 0
-    group_heading = ""
-    subgroup_heading = ""
 
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        entry_type = entry.get("type")
-        if entry_type == "group_header":
-            group_index += 1
-            subgroup_index = 0
+        entry_type = str(entry.get("type") or "")
+        if entry_type in header_levels:
+            level = min(header_levels[entry_type], len(level_counters) + 1)
+            level_counters = level_counters[:level]
+            while len(level_counters) < level:
+                level_counters.append(0)
+            level_counters[level - 1] += 1
+            active_indices = level_counters[:]
+            active_headers = active_headers[: level - 1]
+            active_headers.append(
+                {
+                    "level": level + 1,
+                    "type": entry_type,
+                    "index": active_indices[-1],
+                    "index_path": active_indices[:],
+                    "title": plain_label(entry.get("heading")),
+                }
+            )
             item_index = 0
-            group_heading = plain_label(entry.get("heading"))
-            subgroup_heading = ""
-            continue
-        if entry_type == "subgroup_header":
-            subgroup_index += 1
-            item_index = 0
-            subgroup_heading = plain_label(entry.get("heading"))
             continue
         if entry_type != "step":
             continue
@@ -472,24 +625,12 @@ def export_workflow_entries(
             continue
 
         item_index += 1
-        file_name = unique_file_name(
-            f"{prefix}_{group_index:02d}_{subgroup_index:02d}_{item_index:02d}.txt",
-            used_names,
-        )
+        hierarchy_numbers = active_indices + [item_index]
+        base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
+        file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
         hierarchy = section_hierarchy(document_name, section_id, section_heading)
-        if group_heading:
-            hierarchy.append({"level": 2, "type": "group_header", "index": group_index, "title": group_heading})
-        if subgroup_heading:
-            hierarchy.append(
-                {
-                    "level": 3,
-                    "type": "subgroup_header",
-                    "index": subgroup_index,
-                    "title": subgroup_heading,
-                    "parent_group_index": group_index,
-                }
-            )
-        indices = {"group": group_index, "subgroup": subgroup_index, "item": item_index}
+        hierarchy.extend(active_headers)
+        indices = {"path": hierarchy_numbers}
         metadata = base_metadata(
             payload=payload,
             result=result,
@@ -520,16 +661,19 @@ def export_general_instruction_entries(
     section_json: dict[str, Any],
     resolver: PlainTextResolver,
     used_names: set[str],
+    order_state: dict[str, int],
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
-    prefix = SECTION_FILE_PREFIX.get(section_id, section_id.lower())
+    section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
+    prefix = section_file_prefix(section_id, section_english)
     entries = section_json.get("entries") if isinstance(section_json.get("entries"), list) else []
     chunks: list[dict[str, Any]] = []
-    document_name = repair_text((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
+    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
     subsection_index = 0
     item_index = 0
+    active_heading = ""
     for entry in entries:
         if not isinstance(entry, dict):
             value = entry
@@ -545,6 +689,7 @@ def export_general_instruction_entries(
         if entry_type == "subsection":
             subsection_index += 1
             item_index = 0
+            active_heading = heading
         elif entry_type not in {"content", "subsection"}:
             heading = heading or plain_label(entry_type)
 
@@ -553,14 +698,21 @@ def export_general_instruction_entries(
             continue
 
         item_index += 1
-        file_name = unique_file_name(
-            f"{prefix}_{0:02d}_{subsection_index:02d}_{item_index:02d}.txt",
-            used_names,
-        )
+        hierarchy_numbers = ([subsection_index] if subsection_index else []) + [item_index]
+        base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
+        file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
         hierarchy = section_hierarchy(document_name, section_id, section_heading)
-        if heading:
-            hierarchy.append({"level": 2, "type": "subsection", "index": subsection_index, "title": heading})
-        indices = {"group": 0, "subsection": subsection_index, "item": item_index}
+        if active_heading:
+            hierarchy.append(
+                {
+                    "level": 2,
+                    "type": "subsection",
+                    "index": subsection_index,
+                    "index_path": [subsection_index],
+                    "title": active_heading,
+                }
+            )
+        indices = {"path": hierarchy_numbers}
         metadata = base_metadata(
             payload=payload,
             result=result,
@@ -592,47 +744,39 @@ def export_rows_or_content(
     section_json: dict[str, Any],
     resolver: PlainTextResolver,
     used_names: set[str],
+    order_state: dict[str, int],
 ) -> list[dict[str, Any]]:
     section_id = str(result.get("section_id") or section_json.get("section_id") or "")
-    prefix = SECTION_FILE_PREFIX.get(section_id, section_id.lower())
-    document_name = repair_text((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
+    section_english = repair_text(result.get("section_english") or SECTION_ENGLISH.get(section_id, section_id))
+    prefix = section_file_prefix(section_id, section_english)
+    document_name = strip_document_run_suffix((payload.get("summary") or {}).get("document_name") or result.get("document_name") or "")
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
-    chunks: list[dict[str, Any]] = []
 
-    values: list[tuple[str, Any]] = []
-    if "content" in section_json:
-        values.append(("Content", section_json.get("content")))
-    rows = section_json.get("rows")
-    if isinstance(rows, list):
-        for index, row in enumerate(rows, start=1):
-            values.append((f"Row {index}", row))
+    content_blocks, resolved_values = resolve_section_content(section_json, resolver)
+    if not content_blocks:
+        return []
 
-    for item_index, (label, value) in enumerate(values, start=1):
-        resolved = resolver.resolve(value)
-        if not resolved.text:
-            continue
-        file_name = unique_file_name(f"{prefix}_{0:02d}_{0:02d}_{item_index:02d}.txt", used_names)
-        hierarchy = section_hierarchy(document_name, section_id, section_heading)
-        metadata = base_metadata(
-            payload=payload,
-            result=result,
-            section_json=section_json,
-            section_id=section_id,
-            chunk_type="section_content",
-            hierarchy=hierarchy,
-            indices={"group": 0, "subgroup": 0, "item": item_index},
+    file_name = ordered_file_name(f"{prefix}.txt", order_state=order_state, used_names=used_names)
+    hierarchy = section_hierarchy(document_name, section_id, section_heading)
+    metadata = base_metadata(
+        payload=payload,
+        result=result,
+        section_json=section_json,
+        section_id=section_id,
+        chunk_type="section_content",
+        hierarchy=hierarchy,
+        indices={"path": []},
+        output_file_name=file_name,
+        resolved_values=resolved_values,
+    )
+    return [
+        write_chunk(
+            output_dir=output_dir,
             output_file_name=file_name,
-            resolved_values=[resolved],
+            metadata=metadata,
+            content_blocks=content_blocks,
         )
-        chunks.append(
-            write_chunk(
-                output_dir=output_dir,
-                output_file_name=file_name,
-                metadata=metadata,
-                content_blocks=[(label, resolved.text)],
-            )
-        )
-    return chunks
+    ]
 
 
 def reset_output_dir(output_dir: Path) -> None:
@@ -651,22 +795,24 @@ def export_rag_txt_files(
     asset_map: dict[str, Any] | None = None,
     include_sections: set[str] | None = None,
 ) -> dict[str, Any]:
-    include_sections = include_sections or DEFAULT_RAG_SECTION_IDS
     reset_output_dir(output_dir)
     resolver = PlainTextResolver(cell_map=cell_map, table_map=table_map, asset_map=asset_map)
 
     chunks: list[dict[str, Any]] = []
     used_names: set[str] = set()
+    order_state = {"value": 0}
     results = section_json_payload.get("results") if isinstance(section_json_payload.get("results"), list) else []
     for result in results:
         if not isinstance(result, dict) or result.get("status") != "resolved":
             continue
         section_id = str(result.get("section_id") or "")
-        if section_id not in include_sections:
+        if include_sections is not None and section_id not in include_sections:
             continue
         section_json = result.get("section_json")
-        if not isinstance(section_json, dict) or section_json.get("status") == "not_found":
+        if isinstance(section_json, dict) and section_json.get("status") == "not_found":
             continue
+        if not isinstance(section_json, dict):
+            section_json = {"section_id": section_id, "content": section_json}
         entries = section_json.get("entries")
         if section_id in {"SEC12", "SEC13"} and isinstance(entries, list):
             chunks.extend(
@@ -677,6 +823,7 @@ def export_rag_txt_files(
                     section_json=section_json,
                     resolver=resolver,
                     used_names=used_names,
+                    order_state=order_state,
                 )
             )
         elif section_id == "SEC11" and isinstance(entries, list):
@@ -688,6 +835,7 @@ def export_rag_txt_files(
                     section_json=section_json,
                     resolver=resolver,
                     used_names=used_names,
+                    order_state=order_state,
                 )
             )
         else:
@@ -699,15 +847,16 @@ def export_rag_txt_files(
                     section_json=section_json,
                     resolver=resolver,
                     used_names=used_names,
+                    order_state=order_state,
                 )
             )
 
     summary = section_json_payload.get("summary") if isinstance(section_json_payload.get("summary"), dict) else {}
     manifest = {
         "export_type": "rag_txt",
-        "document_name": repair_text(summary.get("document_name") or ""),
+        "document_name": strip_document_run_suffix(summary.get("document_name") or ""),
         "document_path": repair_text(summary.get("document_path") or ""),
-        "included_sections": sorted(include_sections),
+        "included_sections": sorted(include_sections) if include_sections is not None else "all",
         "output_dir": str(output_dir),
         "chunk_count": len(chunks),
         "chunks": chunks,
