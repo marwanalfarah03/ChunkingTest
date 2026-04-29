@@ -1,0 +1,278 @@
+{
+  "summary": {
+    "run_timestamp_utc": "2026-04-29T09:11:22Z",
+    "document_name": "SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034",
+    "document_path": "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034",
+    "classification_output_path": "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/classification_output.json",
+    "column_inspection_output_path": "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/column_header_inspection.json",
+    "model": "/data/models/gpt-oss-120b",
+    "resolved_base_url": "http://localhost:8020/v1",
+    "total_spans_processed": 8,
+    "resolved_count": 8,
+    "failed_count": 0
+  },
+  "results": [
+    {
+      "section_id": "SEC02",
+      "section_arabic": "ترويسة الوثيقة",
+      "section_english": "Document Header",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0000_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0000_table.txt"
+      ],
+      "column_inspection_used": false,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC02",
+        "rows": [
+          {
+            "type": "data_row",
+            "cells": [
+              "  <strong>اجراءات العمل الخاصة بفروع المولات</strong> "
+            ]
+          },
+          {
+            "type": "data_row",
+            "cells": [
+              "   <strong>(1203)</strong>                            "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "SEC03",
+      "section_arabic": "ضبط الوثيقة",
+      "section_english": "Document Control",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0002_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0002_table.txt"
+      ],
+      "column_inspection_used": true,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC03",
+        "section_heading": "ضبط الوثيقة [#222A35]",
+        "columns": [
+          "اسم الوثيقة",
+          "نوعها",
+          "الدائرة / الوحدة"
+        ],
+        "header_cell_ids": [
+          "CL000005",
+          "CL000006",
+          "CL000007"
+        ],
+        "rows": [
+          {
+            "اسم الوثيقة": "CL000008",
+            "نوعها": "CL000009",
+            "الدائرة / الوحدة": "CL000010"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "SEC04",
+      "section_arabic": "إقرار الوثيقة",
+      "section_english": "Document Approval",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0003_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0003_table.txt"
+      ],
+      "column_inspection_used": true,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC04",
+        "section_heading": "إقرار الوثيقة [#222A35]",
+        "columns": [
+          "الاعداد",
+          "المراجعة"
+        ],
+        "header_cell_ids": [
+          "CL000012",
+          "CL000013"
+        ],
+        "rows": [
+          {
+            "الاعداد": "CL000014",
+            "المراجعة": "CL000015"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "SEC05",
+      "section_arabic": "ضبط الإصدار",
+      "section_english": "Version Control",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0004_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0004_table.txt"
+      ],
+      "column_inspection_used": true,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC05",
+        "section_heading": "ضبط الإصدار [#222A35]",
+        "columns": [
+          "رقم الاصدار",
+          "تاريخه",
+          "تم الاعداد / التعديل من قبل",
+          "اسباب التعديل"
+        ],
+        "header_cell_ids": [
+          "CL000018",
+          "CL000019",
+          "CL000020",
+          "CL000021"
+        ],
+        "rows": [
+          {
+            "رقم الاصدار": "CL000022",
+            "تاريخه": "CL000023",
+            "تم الاعداد / التعديل من قبل": "CL000024",
+            "اسباب التعديل": "CL000025"
+          },
+          {
+            "رقم الاصدار": "CL000026",
+            "تاريخه": "CL000027",
+            "تم الاعداد / التعديل من قبل": "CL000028",
+            "اسباب التعديل": "CL000029"
+          },
+          {
+            "رقم الاصدار": "CL000030",
+            "تاريخه": "CL000031",
+            "تم الاعداد / التعديل من قبل": "CL000032",
+            "اسباب التعديل": "CL000033"
+          },
+          {
+            "رقم الاصدار": "CL000034",
+            "تاريخه": "CL000035",
+            "تم الاعداد / التعديل من قبل": "CL000036",
+            "اسباب التعديل": "CL000037"
+          },
+          {
+            "رقم الاصدار": "CL000038",
+            "تاريخه": "CL000039",
+            "تم الاعداد / التعديل من قبل": "CL000040",
+            "اسباب التعديل": "CL000041"
+          },
+          {
+            "رقم الاصدار": "CL000042",
+            "تاريخه": "CL000043",
+            "تم الاعداد / التعديل من قبل": "CL000044",
+            "اسباب التعديل": "CL000045"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "SEC07",
+      "section_arabic": "الهدف من الوثيقة",
+      "section_english": "Purpose",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0006_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0006_table.txt"
+      ],
+      "column_inspection_used": false,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC07",
+        "section_heading": "1. الهدف من الوثيقة [#222A35]",
+        "content": "CL000047"
+      }
+    },
+    {
+      "section_id": "SEC08",
+      "section_arabic": "مجال التطبيق",
+      "section_english": "Scope",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0007_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0007_table.txt"
+      ],
+      "column_inspection_used": false,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC08",
+        "section_heading": "2. مجال التطبيق [#222A35]",
+        "content": "CL000049"
+      }
+    },
+    {
+      "section_id": "SEC11",
+      "section_arabic": "التعليمات العامة",
+      "section_english": "General Instructions",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0010_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0010_table.txt"
+      ],
+      "column_inspection_used": false,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC11",
+        "section_heading": "6. التعليمات العامة [#222A35]",
+        "entries": [
+          {
+            "type": "content",
+            "value": "CL000113"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "SEC12",
+      "section_arabic": "الإجراء",
+      "section_english": "Procedures / Workflow Steps",
+      "span_index": 1,
+      "source_chunk_file_names": [
+        "0011_table.txt"
+      ],
+      "source_relative_paths": [
+        "documents/SOP 1203 - اجراءات العمل الخاصة بفروع المولات_20260429_121034/chunks/0011_table.txt"
+      ],
+      "column_inspection_used": true,
+      "status": "resolved",
+      "llm_attempt_count": 1,
+      "invalid_attempts": [],
+      "section_json": {
+        "section_id": "SEC12",
+        "status": "not_found"
+      }
+    }
+  ]
+}

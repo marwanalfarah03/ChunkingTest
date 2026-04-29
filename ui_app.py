@@ -175,6 +175,7 @@ class DocumentRenderer:
         table_map: dict[str, Any],
         cell_map: dict[str, Any],
         asset_map: dict[str, Any],
+        inspection_payload: dict[str, Any] | None = None,
     ) -> None:
         self.job_id = job_id
         self.document_path = document_path
@@ -182,6 +183,7 @@ class DocumentRenderer:
         self.table_map = table_map
         self.cell_map = cell_map
         self.asset_map = asset_map
+        self.inspection_payload = inspection_payload or {}
 
     def render_inline_text(self, value: Any) -> str:
         fixed = INVISIBLE_CHARS_RE.sub("", repair_text(value))
@@ -646,18 +648,281 @@ class DocumentRenderer:
             body = self.render_generic_value(payload)
         return '<article class="final-section">' f'{self.render_heading(heading, fallback_heading)}' f'{body}</article>'
 
-    def render_section_fallback(self, section_id: str, result: dict[str, Any]) -> str:
-        chunk_names = result.get("source_chunk_file_names") or []
-        chunk_paths = result.get("source_relative_paths") or []
-        section_meta = section_display(section_id)
-        heading_html = self.render_heading(section_meta["label"], section_meta["label"])
-        body_html = "".join(
-            self.render_chunk(str(name), str(path))
-            for name, path in zip(chunk_names, chunk_paths)
-        )
-        if not body_html:
-            return ""
-        return f'<article class="final-section">{heading_html}{body_html}</article>'
+    def table_ids_for_chunk_names(self, chunk_names: list[str]) -> list[str]:
+        chunk_lookup: dict[str, str] = {}
+        for table_id, table in self.table_map.items():
+            if isinstance(table, dict) and table.get("chunk_file_name"):
+                chunk_lookup[str(table["chunk_file_name"])] = str(table_id)
+
+        table_ids: list[str] = []
+        seen: set[str] = set()
+        for chunk_name in chunk_names:
+            table_id = chunk_lookup.get(str(chunk_name))
+            if table_id and table_id not in seen:
+                table_ids.append(table_id)
+                seen.add(table_id)
+        return table_ids
+
+    def table_rows_for_ids(self, table_ids: list[str]) -> list[dict[str, Any]]:
+        table_rows: list[dict[str, Any]] = []
+        for table_id in table_ids:
+            table = self.table_map.get(table_id)
+            if not isinstance(table, dict):
+                continue
+            column_count = int(table.get("column_count") or 0)
+            grouped_rows: dict[int, list[dict[str, Any]]] = {}
+            for cell in self.cells_for_table(table_id):
+                row_index = int(cell.get("row") or 0)
+                if row_index <= 0:
+                    continue
+                grouped_rows.setdefault(row_index, []).append(
+                    {
+                        **cell,
+                        "row": row_index,
+                        "col": int(cell.get("col") or 0),
+                        "rowspan": int(cell.get("rowspan") or 1),
+                        "colspan": int(cell.get("colspan") or 1),
+                    }
+                )
+
+            for row_index in sorted(grouped_rows):
+                cells = sorted(grouped_rows[row_index], key=lambda c: (int(c.get("col") or 0), c["cell_id"]))
+                first_colspan = int(cells[0].get("colspan") or 1) if cells else 1
+                table_rows.append(
+                    {
+                        "table_id": table_id,
+                        "row_index": row_index,
+                        "column_count": column_count,
+                        "cells": cells,
+                        "is_full_width": len(cells) == 1 and first_colspan >= max(column_count, 1),
+                    }
+                )
+        return table_rows
+
+    def cell_display_value(self, cell: dict[str, Any]) -> str:
+        display_text = str(cell.get("display_text") or "").strip()
+        cell_id = str(cell.get("cell_id") or "")
+        if display_text and display_text != cell_id:
+            return display_text
+        return str(cell.get("text") or "").strip()
+
+    def cleaned_label(self, value: Any) -> str:
+        label, _ = extract_display_color(value)
+        without_tags = FORMATTING_TAG_RE.sub("", repair_text(label))
+        without_invisible = INVISIBLE_CHARS_RE.sub("", without_tags)
+        return re.sub(r"\s+", " ", without_invisible).strip()
+
+    def normalized_label(self, value: Any) -> str:
+        return re.sub(r"[^\w]+", "", self.cleaned_label(value), flags=re.UNICODE).casefold()
+
+    def inspection_result_for(self, section_id: str, chunk_names: list[str]) -> dict[str, Any] | None:
+        chunk_set = {str(name) for name in chunk_names}
+        for result in self.inspection_payload.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            if result.get("status") == "skipped" or result.get("inspected_section_id") != section_id:
+                continue
+            source_files = set(result.get("source_chunk_file_names") or [])
+            group_files = set(result.get("table_group_source_chunk_file_names") or [])
+            if (source_files | group_files) & chunk_set:
+                return result
+        return None
+
+    def canonical_columns_for_section(self, section_id: str, column_count: int) -> list[str]:
+        schemas = getattr(header_inspection, "HEADER_SECTION_SCHEMAS", {})
+        schema = schemas.get(section_id) if isinstance(schemas, dict) else None
+        for order in getattr(schema, "canonical_orders", ()) or ():
+            if not column_count or len(order) == column_count:
+                return [str(column) for column in order]
+        return []
+
+    def column_context(
+        self,
+        section_id: str,
+        chunk_names: list[str],
+        column_count: int,
+    ) -> tuple[list[str], list[str]]:
+        inspection_result = self.inspection_result_for(section_id, chunk_names)
+        resolution = inspection_result.get("resolution") if isinstance(inspection_result, dict) else None
+        columns: list[str] = []
+        header_cell_ids: list[str] = []
+        if isinstance(resolution, dict):
+            columns = [str(column) for column in resolution.get("valid_column_order") or [] if str(column).strip()]
+            header_cell_ids = [str(cell_id) for cell_id in resolution.get("actual_header_cell_ids") or []]
+        if not columns:
+            columns = self.canonical_columns_for_section(section_id, column_count)
+        return columns, header_cell_ids
+
+    def row_is_column_header(
+        self,
+        row: dict[str, Any],
+        columns: list[str],
+        header_cell_ids: list[str],
+    ) -> bool:
+        row_cell_ids = {str(cell.get("cell_id") or "") for cell in row.get("cells") or []}
+        header_id_set = set(header_cell_ids)
+        if header_id_set and header_id_set.issubset(row_cell_ids):
+            return True
+        if not columns:
+            return False
+        cells = sorted(row.get("cells") or [], key=lambda c: (int(c.get("col") or 0), str(c.get("cell_id") or "")))
+        if len(cells) < len(columns):
+            return False
+        candidate_labels = [self.normalized_label(self.cell_display_value(cell)) for cell in cells[: len(columns)]]
+        expected_labels = [self.normalized_label(column) for column in columns]
+        return all(candidate and candidate == expected for candidate, expected in zip(candidate_labels, expected_labels))
+
+    def row_looks_like_section_heading(self, section_id: str, value: Any) -> bool:
+        text = self.cleaned_label(value)
+        meta = section_display(section_id)
+        needles = [
+            self.cleaned_label(meta.get("arabic") or ""),
+            self.cleaned_label(meta.get("short_label") or ""),
+        ]
+        return any(needle and needle.casefold() in text.casefold() for needle in needles)
+
+    def workflow_heading_type(self, value: Any) -> str:
+        _, color = extract_display_color(value)
+        if color and color.upper() in {"#222A35", "#233744", "#243744", "#253744"}:
+            return "group_header"
+        return "subgroup_header"
+
+    def step_entry_for_row(self, row: dict[str, Any], columns: list[str]) -> dict[str, str] | None:
+        cells = sorted(row.get("cells") or [], key=lambda c: (int(c.get("col") or 0), str(c.get("cell_id") or "")))
+        if not cells or not any(self.cleaned_label(self.cell_display_value(cell)) for cell in cells):
+            return None
+        entry: dict[str, str] = {"type": "step"}
+        for index, column in enumerate(columns):
+            if index < len(cells):
+                entry[column] = str(cells[index]["cell_id"])
+        return entry if len(entry) > 1 else None
+
+    def infer_columns_from_rows(self, rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+        for row in rows:
+            if row.get("is_full_width"):
+                continue
+            cells = sorted(row.get("cells") or [], key=lambda c: (int(c.get("col") or 0), str(c.get("cell_id") or "")))
+            labels = [self.cleaned_label(self.cell_display_value(cell)) or str(cell.get("cell_id") or "") for cell in cells]
+            if labels:
+                return labels, [str(cell["cell_id"]) for cell in cells]
+        return [], []
+
+    def build_workflow_table_section_json(
+        self,
+        section_id: str,
+        rows: list[dict[str, Any]],
+        columns: list[str],
+        header_cell_ids: list[str],
+    ) -> dict[str, Any] | None:
+        if len(columns) < 2:
+            inferred_columns, inferred_header_ids = self.infer_columns_from_rows(rows)
+            columns = inferred_columns[:2]
+            header_cell_ids = header_cell_ids or inferred_header_ids[:2]
+        else:
+            columns = columns[:2]
+        if len(columns) < 2:
+            return None
+
+        section_heading: str | None = None
+        entries: list[dict[str, Any]] = []
+        for row in rows:
+            if self.row_is_column_header(row, columns, header_cell_ids):
+                continue
+            cells = sorted(row.get("cells") or [], key=lambda c: (int(c.get("col") or 0), str(c.get("cell_id") or "")))
+            if not cells:
+                continue
+            if row.get("is_full_width") or len(cells) == 1:
+                heading = self.cell_display_value(cells[0])
+                if not self.cleaned_label(heading):
+                    continue
+                if section_heading is None and self.row_looks_like_section_heading(section_id, heading):
+                    section_heading = heading
+                    continue
+                entries.append({"type": self.workflow_heading_type(heading), "heading": heading})
+                continue
+            step_entry = self.step_entry_for_row(row, columns)
+            if step_entry:
+                entries.append(step_entry)
+
+        if not entries:
+            return None
+        payload: dict[str, Any] = {
+            "section_id": section_id,
+            "columns": columns,
+            "header_cell_ids": header_cell_ids,
+            "entries": entries,
+        }
+        if section_heading:
+            payload["section_heading"] = section_heading
+        return payload
+
+    def build_matrix_table_section_json(
+        self,
+        section_id: str,
+        rows: list[dict[str, Any]],
+        columns: list[str],
+        header_cell_ids: list[str],
+    ) -> dict[str, Any] | None:
+        if not columns:
+            columns, inferred_header_ids = self.infer_columns_from_rows(rows)
+            header_cell_ids = header_cell_ids or inferred_header_ids
+        if not columns:
+            return None
+
+        section_heading: str | None = None
+        data_rows: list[dict[str, str]] = []
+        for row in rows:
+            if self.row_is_column_header(row, columns, header_cell_ids):
+                continue
+            cells = sorted(row.get("cells") or [], key=lambda c: (int(c.get("col") or 0), str(c.get("cell_id") or "")))
+            if not cells:
+                continue
+            if row.get("is_full_width") or len(cells) == 1:
+                value = self.cell_display_value(cells[0])
+                if not self.cleaned_label(value):
+                    continue
+                if section_heading is None and self.row_looks_like_section_heading(section_id, value):
+                    section_heading = value
+                else:
+                    data_rows.append({columns[0]: value})
+                continue
+            data_row: dict[str, str] = {}
+            for index, column in enumerate(columns):
+                if index < len(cells):
+                    data_row[column] = str(cells[index]["cell_id"])
+            if data_row:
+                data_rows.append(data_row)
+
+        if not data_rows:
+            return None
+        payload: dict[str, Any] = {
+            "section_id": section_id,
+            "header_cell_ids": header_cell_ids,
+            "columns": columns,
+            "rows": data_rows,
+        }
+        if section_heading:
+            payload["section_heading"] = section_heading
+        return payload
+
+    def build_table_section_json(self, section_id: str, chunk_names: list[str]) -> dict[str, Any] | None:
+        table_ids = self.table_ids_for_chunk_names(chunk_names)
+        if not table_ids:
+            return None
+        rows = self.table_rows_for_ids(table_ids)
+        if not rows:
+            return None
+
+        max_column_count = max((int(row.get("column_count") or 0) for row in rows), default=0)
+        columns, header_cell_ids = self.column_context(section_id, chunk_names, max_column_count)
+        if section_id in {"SEC12", "SEC13"}:
+            return self.build_workflow_table_section_json(
+                section_id,
+                rows,
+                columns,
+                header_cell_ids,
+            )
+        return self.build_matrix_table_section_json(section_id, rows, columns, header_cell_ids)
 
     def render_final_document(self, section_payload: dict[str, Any], display_name: str) -> str:
         results = section_payload.get("results") or []
@@ -675,9 +940,14 @@ class DocumentRenderer:
             section_id = str(result.get("section_id") or "")
             section_json = result.get("section_json")
             if isinstance(section_json, dict) and section_json.get("status") == "not_found":
-                html = self.render_section_fallback(section_id, result)
-            else:
-                html = self.render_section_payload(section_id, section_json)
+                raw_chunk_names = result.get("source_chunk_file_names") or []
+                chunk_names = raw_chunk_names if isinstance(raw_chunk_names, list) else [str(raw_chunk_names)]
+                fallback = self.build_table_section_json(section_id, chunk_names)
+                if fallback is None:
+                    continue
+                result["section_json"] = fallback
+                section_json = fallback
+            html = self.render_section_payload(section_id, section_json)
             if html:
                 pieces.append(html)
                 rendered_count += 1
@@ -821,6 +1091,7 @@ def build_renderer(job: UiJob) -> DocumentRenderer:
         table_map=table_map,
         cell_map=cell_map,
         asset_map=asset_map,
+        inspection_payload=job.inspection_payload,
     )
 
 
@@ -1042,6 +1313,8 @@ def run_pipeline(job: UiJob) -> None:
         job.update_step("final", "running", "Preparing display")
         renderer = build_renderer(job)
         job.final_html = renderer.render_final_document(section_json_payload, job.display_name)
+        if job.section_json_output_path is not None:
+            classification.write_json(job.section_json_output_path, section_json_payload)
         job.update_step("final", "done", "Final document is ready")
         job.set_progress(current=1, total=1, detail="Final document is ready")
         job.set_status("completed", "final", "Final document ready", "Final document is ready")
