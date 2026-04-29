@@ -108,6 +108,11 @@ function sectionPicker(item) {
 }
 
 function renderReview() {
+  const openIndexes = new Set();
+  reviewList.querySelectorAll('[data-review-index]').forEach((card) => {
+    if (card.querySelector('details.area-picker')?.open) openIndexes.add(card.dataset.reviewIndex);
+  });
+
   const approved = state.reviewItems.filter((item) => item.approved).length;
   reviewCount.textContent = `${approved} of ${state.reviewItems.length} approved`;
   continueButton.disabled = approved !== state.reviewItems.length || state.reviewItems.length === 0;
@@ -126,6 +131,15 @@ function renderReview() {
       </footer>
     </article>
   `).join('');
+
+  if (openIndexes.size) {
+    reviewList.querySelectorAll('[data-review-index]').forEach((card) => {
+      if (openIndexes.has(card.dataset.reviewIndex)) {
+        const details = card.querySelector('details.area-picker');
+        if (details) details.open = true;
+      }
+    });
+  }
 }
 
 function collectCardSections(card) {

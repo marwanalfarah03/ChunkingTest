@@ -39,6 +39,7 @@ COLOR_TOKEN_RE = re.compile(r"\s*\[#([0-9A-Fa-f]{6})\]\s*")
 RTL_CHAR_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 LTR_CHAR_RE = re.compile(r"[A-Za-z]")
 FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
+INVISIBLE_CHARS_RE = re.compile(r"[​‌‍‎‏‪-‮⁠﻿]")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
@@ -182,7 +183,7 @@ class DocumentRenderer:
         self.asset_map = asset_map
 
     def render_inline_text(self, value: Any) -> str:
-        fixed = repair_text(value)
+        fixed = INVISIBLE_CHARS_RE.sub("", repair_text(value))
         if not fixed:
             return ""
         colorized = COLOR_TOKEN_RE.sub(
