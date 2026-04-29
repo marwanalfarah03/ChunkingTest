@@ -39,7 +39,7 @@ Format A — Simple:
   "section_id": "SEC18",
   "section_heading": "<heading text as it appears>",
   "format": "simple",
-  "content": "<CL reference or visible text>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Format B — Glossary table:
@@ -57,7 +57,9 @@ Format B — Glossary table:
 Rules:
 - Use Format A when there is a single content cell after the heading.
 - Use Format B when the section has a column-header row and multiple definition rows.
+- For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - For Format B: "columns" lists column labels (visible text or CL IDs if hidden); "header_cell_ids" lists the actual header cell IDs if present, otherwise [].
+- For Format B: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If a column header is a CL ID, use that CL ID as the key in each row — do NOT repeat it as a value.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.

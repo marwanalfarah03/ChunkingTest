@@ -82,6 +82,7 @@ Rules:
 - Preserve exact document order of all entries.
 - Do NOT include content from SEC13 or other sections.
 - If the input spans multiple merged tables, treat them as one continuous section.
+- If additional free-form text appears in the input that belongs to this section but doesn't fit into any defined entry type, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.
 - If SEC12 content is not found in the input, return {"section_id": "SEC12", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 

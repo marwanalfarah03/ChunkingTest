@@ -32,7 +32,7 @@ Format A — Simple:
   "section_id": "SEC09",
   "section_heading": "<heading text as it appears>",
   "format": "simple",
-  "content": "<CL reference or visible text>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Format B — Responsibility matrix:
@@ -50,7 +50,9 @@ Format B — Responsibility matrix:
 Rules:
 - Use Format A when the section has a single content cell after the heading.
 - Use Format B when the section has a multi-column table with multiple data rows.
+- For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - For Format B: "columns" lists the column labels (visible text or CL IDs if headers are hidden); "header_cell_ids" lists the actual header cell IDs if visible, or [] if the header row is hidden/absent.
+- For Format B: if additional text appears that doesn't fit into a matrix row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If a column header is a CL ID, use that CL ID as the key — do NOT repeat it as a value in data rows.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.

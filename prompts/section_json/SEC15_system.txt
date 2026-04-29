@@ -36,7 +36,7 @@ Format A — Simple:
   "section_id": "SEC15",
   "section_heading": "<heading text as it appears>",
   "format": "simple",
-  "content": "<CL reference or visible text>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Format B — Retention table:
@@ -57,6 +57,8 @@ Format B — Retention table:
 Rules:
 - Use Format A when there is a single content cell after the heading.
 - Use Format B when the table has a column-header row and multiple data rows.
+- For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
+- For Format B: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - "columns" must exactly match the resolved valid_column_order from the inspection result (when provided). Default: ["الفئة", "اسم الملف"].
 - "header_cell_ids" lists the actual header cell IDs from the inspection result, or [] if absent.
 - If the column header row is visible in the rendered table, do NOT include those cells as a data row.

@@ -52,6 +52,7 @@ Rules:
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.
 - If the column header inspection result is not provided, infer columns from visible labels. Default: ["الاعداد", "المراجعة"].
+- If additional free-form text appears in the input that belongs to this section but doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If SEC04 content is not found in the input, return {"section_id": "SEC04", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 

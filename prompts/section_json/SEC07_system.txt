@@ -25,13 +25,14 @@ Return only valid JSON with this exact structure:
 {
   "section_id": "SEC07",
   "section_heading": "<heading text as it appears, e.g. 1. الهدف من الوثيقة [#253744]>",
-  "content": "<CL reference or visible text value>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Rules:
 - "section_heading" is the full text of the heading row exactly as rendered.
 - "content" is the value of the single content cell (typically a CL ID such as CL000080).
 - If the content cell contains visible text instead of a CL ID, preserve it exactly.
+- If additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - Do NOT include content from other sections (SEC08 "مجال التطبيق", etc.).
 - If SEC07 content is not found in the input, return {"section_id": "SEC07", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.

@@ -80,6 +80,7 @@ Rules:
 - Preserve text exactly including bold tags, color codes, Arabic text.
 - Preserve exact document order of all entries.
 - Do NOT include content from SEC12 or other sections.
+- If additional free-form text appears in the input that belongs to this section but doesn't fit into any defined entry type, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.
 - If SEC13 content is not found in the input, return {"section_id": "SEC13", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 

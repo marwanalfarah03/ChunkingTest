@@ -25,12 +25,13 @@ Return only valid JSON with this exact structure:
 {
   "section_id": "SEC08",
   "section_heading": "<heading text as it appears, e.g. 2. مجال التطبيق [#253744]>",
-  "content": "<CL reference or visible text value>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Rules:
 - "section_heading" is the full text of the heading row exactly as rendered.
 - "content" is the value of the single content cell.
+- If additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - Do NOT include rows from SEC07 (الهدف), SEC09 (المسؤوليات), or any other section.
 - If the combined "مجال التطبيق والمسؤوليات" heading is present, extract it as-is under SEC08 — the same data also covers SEC09.
 - If SEC08 content is not found in the input, return {"section_id": "SEC08", "status": "not_found"}.

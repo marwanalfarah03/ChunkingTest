@@ -26,7 +26,7 @@ Simple format (single content cell):
 {
   "section_id": "SEC19",
   "section_heading": "<heading text as it appears>",
-  "content": "<CL reference or visible text>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Table format (when form structure is visible with multiple rows):
@@ -42,6 +42,8 @@ Rules:
 - The heading must be "النماذج" — if you see "النماذج المستخدمة", that is SEC17, not SEC19.
 - Use simple format when there is exactly one content cell.
 - Use table format when multiple rows are visible.
+- For simple format: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
+- For table format: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.
 - Do NOT include content from SEC17 (النماذج المستخدمة) or other sections.

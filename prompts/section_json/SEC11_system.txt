@@ -63,6 +63,7 @@ Rules:
 - Do NOT include content from other sections.
 - If a subsection heading row has no following content cell before the next heading, set "value" to null.
 - If SEC11 has only a single content cell and no subsections, "entries" will have one item with "type": "content".
+- If additional free-form text appears in the input that belongs to this section but doesn't fit into any defined entry type, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.
 - If SEC11 content is not found in the input, return {"section_id": "SEC11", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 

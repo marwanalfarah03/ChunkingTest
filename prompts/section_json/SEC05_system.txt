@@ -54,6 +54,7 @@ Rules:
 - Preserve text exactly including color codes and HTML tags.
 - If the input is a merged multi-txt span (multiple tables concatenated), traverse all rows in order; do not restart row numbering or skip rows between former table boundaries.
 - If the column header inspection result is not provided, infer columns from visible labels. Default order: ["رقم الاصدار", "تاريخه", "تم الاعداد / التعديل من قبل", "اسباب التعديل"].
+- If additional free-form text appears in the input that belongs to this section but doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If SEC05 content is not found in the input, return {"section_id": "SEC05", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 

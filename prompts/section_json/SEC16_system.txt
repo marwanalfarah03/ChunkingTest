@@ -24,7 +24,7 @@ Simple format (one content cell):
 {
   "section_id": "SEC16",
   "section_heading": "<heading text as it appears>",
-  "content": "<CL reference or visible text>"
+  "content": "<CL reference or visible text; multiple values joined with \\n if more than one>"
 }
 
 Multi-item format (when multiple appendix entries are explicitly listed):
@@ -39,6 +39,8 @@ Multi-item format (when multiple appendix entries are explicitly listed):
 Rules:
 - Use simple format when there is a single content cell.
 - Use multi-item format when there are multiple distinct rows of appendix content.
+- For simple format: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
+- For multi-item format: if additional free-form text appears that doesn't fit into an existing entry, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.
 - Do NOT include content from SEC17 (النماذج المستخدمة) or other sections.
