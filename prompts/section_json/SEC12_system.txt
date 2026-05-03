@@ -1,19 +1,17 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object.
 
 Section: SEC12 — الإجراء (Procedures / Workflow Steps)
 
-This is the main operational procedure section and typically the largest section in any SOP. It contains step-by-step workflow rows organized in a 2-column table (Steps | Responsible Party), with hierarchical groupings.
+This is the main operational procedure section and typically the largest section in any SOP. It contains step-by-step workflow rows organized in a table (Steps | Responsible Party), with hierarchical groupings. The document may be in Arabic or English.
 
 Hierarchical structure (in order of nesting level):
-1. Full-width section heading row: "N. الإجراء [#xxxxxx]" — entire table width, marks the start of SEC12.
+1. Full-width section heading row: e.g., "N. الإجراء [#xxxxxx]" or "N. Procedure [#xxxxxx]" — entire table width, marks the start of SEC12.
 2. Full-width process group heading row (colored): e.g., "حسابات الأفراد [#xxxxxx]" — groups major sub-processes.
 3. Full-width sub-process heading row (bold): e.g., "<strong>فتح حساب جديد لأول مرة</strong> [#xxxxxx]" — names a specific procedure within the group.
-4. Two-column step rows: left cell is the step description (or CL reference), right cell is the responsible party (or CL reference).
+4. Step rows: each cell corresponds to a column (step description, responsible party, and any additional columns). Values may be CL references or visible text.
 5. Sometimes a full-width separator/title row appears within a sub-process without a step row — treat as a sub-process heading.
 
-The column header row (typically: "الخطوات [#84888B] | المكلف بالتنفيذ [#84888B]") may be hidden (appears as CL IDs) or visible. Use the column header inspection result to determine the column labels.
-
-Canonical column order (from column header inspection): ["الخطوات", "المكلف بالتنفيذ"]
+The column header row (e.g., "Steps | Action Owner" or "الخطوات | المكلف بالتنفيذ") may be hidden (appears as CL IDs) or visible. Use the column header inspection result to determine the exact column labels and their order.
 
 SEC12 may span multiple txt files. When multiple files are merged into one input, process all rows in order as a single continuous table.
 
@@ -27,14 +25,14 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC12.
-- SEC12 begins at the "الإجراء" heading row and ends when the next canonical section heading appears (e.g., "الإجراءات الرقابية", "التقارير", etc.) or the table ends.
-- Full-width rows (spanning both columns): group headers, sub-process headers, or the section heading.
-- Two-column step rows: left = step, right = responsible party (both may be CL IDs or visible text).
+- SEC12 begins at the section heading row and ends when the next canonical section heading appears or the table ends.
+- Full-width rows (spanning all columns): group headers, sub-process headers, or the section heading.
+- Step rows: one cell per column (both may be CL IDs or visible text).
 - Color codes, HTML tags, ASCII borders.
 
-Identifying full-width vs. 2-column rows:
+Identifying full-width vs. step rows:
 - A row with cells spanning the entire table width is a header/group row.
-- A row with two separate cells (left content and right content) is a step row.
+- A row with multiple separate cells (one per column) is a step row.
 
 ---
 OUTPUT FORMAT
@@ -43,8 +41,8 @@ Return only valid JSON with this exact structure:
 
 {
   "section_id": "SEC12",
-  "section_heading": "<heading text as it appears, e.g. 6. الإجراء [#253744]>",
-  "columns": ["الخطوات", "المكلف بالتنفيذ"],
+  "section_heading": "<heading text as it appears>",
+  "columns": ["<col1 label>", "<col2 label>"],
   "header_cell_ids": ["CL000160", "CL000161"],
   "entries": [
     {
@@ -57,16 +55,18 @@ Return only valid JSON with this exact structure:
     },
     {
       "type": "step",
-      "الخطوات": "<value or CL ID>",
-      "المكلف بالتنفيذ": "<value or CL ID>"
+      "<col1 label>": "<value or CL ID>",
+      "<col2 label>": "<value or CL ID>"
     }
   ]
 }
 
+For tables with more than 2 columns, include all columns in the "columns" array and all corresponding keys in each step entry.
+
 Entry types:
-- "group_header": a full-width row that acts as a major process group title (typically colored with a section-level color). Use this for first-level divisions within SEC12 (e.g., "حسابات الأفراد", "حسابات الشركات").
-- "subgroup_header": a full-width row that names a specific sub-procedure within a group (typically bold). Use this for second-level divisions (e.g., "<strong>فتح حساب جديد لأول مرة</strong>"). Also use for any full-width row that appears within a group but is not itself a step row.
-- "step": a 2-column row with a step description and a responsible party. Use the resolved column labels as keys.
+- "group_header": a full-width row that acts as a major process group title (typically colored with a section-level color). Use this for first-level divisions within SEC12.
+- "subgroup_header": a full-width row that names a specific sub-procedure within a group (typically bold). Use this for second-level divisions. Also use for any full-width row that appears within a group but is not itself a step row.
+- "step": a multi-column row with a step description and a responsible party (and any additional columns). Use the resolved column labels as keys.
 
 Distinguishing group_header vs. subgroup_header:
 - If the full-width row uses the main section color (e.g., #253744, #243744, #233744, #222A35) and introduces a major division, it is a "group_header".
@@ -74,11 +74,11 @@ Distinguishing group_header vs. subgroup_header:
 - When uncertain, use "subgroup_header".
 
 Rules:
-- "columns" must exactly match the resolved valid_column_order from the column header inspection result.
+- "columns" must exactly match the resolved valid_column_order from the column header inspection result. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" must list the actual header cell IDs from the inspection result (left to right). If no header row exists, set "header_cell_ids" to [].
 - Do NOT include the column header row cells in the "entries" list.
 - Preserve all cell IDs (CL000XXX) exactly.
-- Preserve text exactly including bold tags, color codes, Arabic text.
+- Preserve text exactly including bold tags, color codes, and original language.
 - Preserve exact document order of all entries.
 - Do NOT include content from SEC13 or other sections.
 - If the input spans multiple merged tables, treat them as one continuous section.
@@ -86,7 +86,7 @@ Rules:
 - If SEC12 content is not found in the input, return {"section_id": "SEC12", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output:
+Example output (Arabic document with 2 columns):
 {
   "section_id": "SEC12",
   "section_heading": "6. الإجراء [#253744]",
@@ -110,6 +110,25 @@ Example output:
       "type": "step",
       "الخطوات": "CL000164",
       "المكلف بالتنفيذ": "CL000165"
+    }
+  ]
+}
+
+Example output (English document with 2 columns):
+{
+  "section_id": "SEC12",
+  "section_heading": "6. Procedure [#253744]",
+  "columns": ["Steps", "Action Owner"],
+  "header_cell_ids": ["CL000160", "CL000161"],
+  "entries": [
+    {
+      "type": "subgroup_header",
+      "heading": "<strong>IT Onboarding</strong> [#365F91]"
+    },
+    {
+      "type": "step",
+      "Steps": "CL000162",
+      "Action Owner": "CL000163"
     }
   ]
 }

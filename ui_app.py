@@ -612,12 +612,12 @@ class DocumentRenderer:
     def workflow_columns(self, data: dict[str, Any], entries: list[Any]) -> list[str]:
         columns = data.get("columns") or []
         if len(columns) >= 2:
-            return list(columns[:2])
+            return list(columns)
         for entry in entries:
             if isinstance(entry, dict) and entry.get("type") == "step":
                 keys = [key for key in entry.keys() if key != "type"]
                 if len(keys) >= 2:
-                    return keys[:2]
+                    return list(keys)
         return ["Step", "Owner"]
 
     def render_workflow_entries(self, data: dict[str, Any]) -> str:
@@ -675,10 +675,9 @@ class DocumentRenderer:
                 f'<div class="table-scroll"><table class="workflow-table table-{table_direction}" '
                 f'dir="ltr" data-content-dir="{table_direction}"><thead><tr>'
             )
-            first_direction = dominant_direction(columns[0])
-            second_direction = dominant_direction(columns[1])
-            html.append(f'<th class="text-{first_direction}" dir="{first_direction}">{self.render_inline_text(columns[0])}</th>')
-            html.append(f'<th class="text-{second_direction}" dir="{second_direction}">{self.render_inline_text(columns[1])}</th>')
+            for column in columns:
+                col_direction = dominant_direction(column)
+                html.append(f'<th class="text-{col_direction}" dir="{col_direction}">{self.render_inline_text(column)}</th>')
             html.append("</tr></thead><tbody>")
             table_open = True
 
@@ -701,23 +700,23 @@ class DocumentRenderer:
                 html.append(self.render_content_card(entry.get("value")))
             elif entry_type == "step":
                 open_table()
-                first = entry.get(columns[0])
-                second = entry.get(columns[1])
-                if first is None or second is None:
-                    values = [value for key, value in entry.items() if key != "type"]
-                    first = first if first is not None else (values[0] if values else None)
-                    second = second if second is not None else (values[1] if len(values) > 1 else None)
+                fallback_values = [value for key, value in entry.items() if key != "type"]
                 html.append("<tr>")
-                first_direction = dominant_direction(self.direction_source(first))
-                second_direction = dominant_direction(self.direction_source(second))
-                html.append(
-                    f'<td class="workflow-step text-{first_direction}" dir="{first_direction}">'
-                    f'{self.render_rich_text(first)}</td>'
-                )
-                html.append(
-                    f'<td class="workflow-owner text-{second_direction}" dir="{second_direction}">'
-                    f'{self.render_rich_text(second)}</td>'
-                )
+                for col_idx, col in enumerate(columns):
+                    value = entry.get(col)
+                    if value is None and col_idx < len(fallback_values):
+                        value = fallback_values[col_idx]
+                    val_direction = dominant_direction(self.direction_source(value))
+                    if col_idx == 0:
+                        css_cls = "workflow-step"
+                    elif col_idx == len(columns) - 1 and len(columns) == 2:
+                        css_cls = "workflow-owner"
+                    else:
+                        css_cls = "workflow-cell"
+                    html.append(
+                        f'<td class="{css_cls} text-{val_direction}" dir="{val_direction}">'
+                        f'{self.render_rich_text(value)}</td>'
+                    )
                 html.append("</tr>")
             else:
                 close_table()
@@ -982,10 +981,8 @@ class DocumentRenderer:
     ) -> dict[str, Any] | None:
         if len(columns) < 2:
             inferred_columns, inferred_header_ids = self.infer_columns_from_rows(rows)
-            columns = inferred_columns[:2]
-            header_cell_ids = header_cell_ids or inferred_header_ids[:2]
-        else:
-            columns = columns[:2]
+            columns = inferred_columns
+            header_cell_ids = header_cell_ids or inferred_header_ids
         if len(columns) < 2:
             return None
 

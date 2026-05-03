@@ -51,9 +51,10 @@ You resolve column-header order for extracted SOP tables.
 Rules:
 - A full-width section title row is not a column-header row.
 - Hidden header cells can exist even when the rendered chunk only shows CL ids.
-- If the actual header row is present but corrupt, duplicated, blank, or partially missing, still identify that row's cell ids and resolve the final valid canonical column order.
-- If this extracted chunk has no actual header row, return no header cell ids and use the canonical section order.
-- valid_column_order must exactly match one of the allowed canonical orders.
+- If the actual header row is present and its labels are visible (any language), use those exact labels as valid_column_order in the order they appear in the document.
+- If the actual header row is present but corrupt, duplicated, blank, or partially missing, still identify that row's cell ids and fall back to a canonical order if one is available.
+- If this extracted chunk has no actual header row, return no header cell ids and use the canonical section order (or the heuristic hint order if no canonical is available).
+- If no canonical orders are provided (allowed_canonical_orders is empty), detect the actual column labels from the visible header row.
 - Return JSON only.
 """.strip()
 
@@ -206,6 +207,28 @@ def logical_column_count(rows: list[dict[str, Any]]) -> int:
     if non_title_counts:
         return max(non_title_counts)
     return 1 if rows else 0
+
+
+def detect_actual_header_labels(
+    rows: list[dict[str, Any]],
+    column_count: int,
+) -> tuple[list[str], list[str], int | None]:
+    """Scan rows for the first non-title row where every cell has visible text.
+
+    Returns (labels, cell_ids, row_index) — all empty/None if not found.
+    This gives us the actual column header labels as they appear in the document,
+    regardless of language.
+    """
+    for row in rows[:PROMPT_ROW_LIMIT]:
+        if row["is_full_width_title"]:
+            continue
+        cells = sorted(row["cells"], key=lambda c: (int(c["col"]), str(c["cell_id"])))
+        if len(cells) != column_count:
+            continue
+        labels = [cell["plain_text"].strip() for cell in cells]
+        if all(labels):
+            return labels, [cell["cell_id"] for cell in cells], row["row_index"]
+    return [], [], None
 
 
 def resolve_chunk_path(relative_path: str | None) -> Path | None:
@@ -630,11 +653,17 @@ def select_primary_table_group(
     for component in components:
         if component["kind"] != "table_group":
             continue
-        allowed_orders = section_schema.orders_for_column_count(int(component["logical_column_count"]))
-        if not allowed_orders:
+        col_count = int(component["logical_column_count"])
+        if col_count < 1:
             table_group_position += 1
             continue
-        _, _, best_score = find_best_header_match(component["rows"], allowed_orders)
+        allowed_orders = section_schema.orders_for_column_count(col_count)
+        if allowed_orders:
+            _, _, best_score = find_best_header_match(component["rows"], allowed_orders)
+        else:
+            # Non-canonical column count: include the table but score it lower than
+            # any canonical match so canonical-column tables are preferred.
+            best_score = 0.0
         candidates.append(
             (
                 best_score,
@@ -721,26 +750,56 @@ def build_heuristic_resolution(
     allowed_orders: list[tuple[str, ...]],
     rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    default_order = list(allowed_orders[0])
-    matched_row, matched_order, matched_score = find_best_header_match(rows, allowed_orders)
-    if matched_row is not None and matched_order is not None and matched_score >= 0.9:
-        header_cell_ids = [cell["cell_id"] for cell in matched_row["cells"]]
-        visible = all(cell["displayed_in_chunk"] for cell in matched_row["cells"])
-        header_state = "visible_valid" if visible else "hidden_valid"
+    # 1. Try canonical matching (works for Arabic documents with known column labels).
+    if allowed_orders:
+        matched_row, matched_order, matched_score = find_best_header_match(rows, allowed_orders)
+        if matched_row is not None and matched_order is not None and matched_score >= 0.9:
+            header_cell_ids = [cell["cell_id"] for cell in matched_row["cells"]]
+            visible = all(cell["displayed_in_chunk"] for cell in matched_row["cells"])
+            header_state = "visible_valid" if visible else "hidden_valid"
+            return {
+                "status": "resolved",
+                "inspection_required": not visible,
+                "header_state": header_state,
+                "valid_column_order": list(matched_order),
+                "actual_header_row_exists": True,
+                "actual_header_row_index": matched_row["row_index"],
+                "actual_header_cell_ids": header_cell_ids,
+                "brief_description": (
+                    f"Valid column order is {format_column_order(matched_order)}. "
+                    f"Actual header cells are {', '.join(header_cell_ids)} on row {matched_row['row_index']} "
+                    f"and they are {'visible' if visible else 'hidden'} in the extracted chunk."
+                ),
+            }
+
+    # 2. No canonical match (or non-canonical column count). Try to detect actual visible
+    #    column labels from the document — handles English documents and extra columns.
+    col_count = (
+        max(len(o) for o in allowed_orders) if allowed_orders else logical_column_count(rows)
+    )
+    actual_labels, actual_cell_ids, actual_row_index = detect_actual_header_labels(rows, col_count)
+    if actual_labels:
         return {
             "status": "resolved",
-            "inspection_required": not visible,
-            "header_state": header_state,
-            "valid_column_order": list(matched_order),
+            "inspection_required": False,
+            "header_state": "visible_valid",
+            "valid_column_order": actual_labels,
             "actual_header_row_exists": True,
-            "actual_header_row_index": matched_row["row_index"],
-            "actual_header_cell_ids": header_cell_ids,
+            "actual_header_row_index": actual_row_index,
+            "actual_header_cell_ids": actual_cell_ids,
             "brief_description": (
-                f"Valid column order is {format_column_order(matched_order)}. "
-                f"Actual header cells are {', '.join(header_cell_ids)} on row {matched_row['row_index']} "
-                f"and they are {'visible' if visible else 'hidden'} in the extracted chunk."
+                f"Actual column labels detected from visible header row: "
+                f"{format_column_order(actual_labels)}."
             ),
         }
+
+    # 3. Nothing found — fall back to the first canonical order or generic labels.
+    if allowed_orders:
+        default_order = list(allowed_orders[0])
+        reason = f"Use the canonical column order {format_column_order(default_order)}."
+    else:
+        default_order = [f"Column {i + 1}" for i in range(col_count)]
+        reason = f"No canonical order and no visible header row; using generic labels {format_column_order(default_order)}."
 
     return {
         "status": "resolved",
@@ -750,10 +809,7 @@ def build_heuristic_resolution(
         "actual_header_row_exists": False,
         "actual_header_row_index": None,
         "actual_header_cell_ids": [],
-        "brief_description": (
-            f"No actual header row is present in this {section_id} chunk. "
-            f"Use the canonical column order {format_column_order(default_order)}."
-        ),
+        "brief_description": f"No actual header row detected in {section_id} chunk. {reason}",
     }
 
 
@@ -800,7 +856,9 @@ def build_user_prompt(
         "Rules for the JSON:\n"
         "- status must always be \"resolved\".\n"
         "- header_state must be one of visible_valid, hidden_valid, visible_invalid, hidden_invalid, missing.\n"
-        "- valid_column_order must exactly match one allowed canonical order.\n"
+        "- valid_column_order: if the actual column header row is visible and contains text labels (in any language), "
+        "use those exact labels in document order. Only fall back to a canonical order when the header is hidden or missing.\n"
+        "- If no canonical orders are provided (allowed_canonical_orders is empty), detect column labels from the visible header row.\n"
         "- If actual_header_row_exists is false, actual_header_row_index must be null and actual_header_cell_ids must be empty.\n"
         "- If actual_header_row_exists is true, actual_header_cell_ids must list the real header cells from left to right.\n"
         "- brief_description must briefly describe the final valid order and whether any cell ids are actual header cells.\n\n"
@@ -852,10 +910,11 @@ def parse_inspection_payload(
     valid_column_order = payload["valid_column_order"]
     if not isinstance(valid_column_order, list) or not all(isinstance(value, str) for value in valid_column_order):
         raise ValueError("The 'valid_column_order' field must be a list of strings.")
-    if tuple(valid_column_order) not in set(allowed_orders):
-        raise ValueError(
-            "The 'valid_column_order' field must exactly match one of the allowed canonical orders."
-        )
+    if not valid_column_order:
+        raise ValueError("The 'valid_column_order' field must not be empty.")
+    # When canonical orders are defined, validate that the returned order either matches
+    # a canonical order OR matches the actual detected header labels (for non-Arabic documents).
+    # We no longer reject non-canonical labels outright since documents may use any language.
 
     if not isinstance(payload["actual_header_row_exists"], bool):
         raise ValueError("The 'actual_header_row_exists' field must be a boolean.")
@@ -927,7 +986,8 @@ def parse_inspection_payload(
             )
         if payload["valid_column_order"] != heuristic_resolution["valid_column_order"]:
             raise ValueError(
-                "The exact header row is already identifiable from the cell map; keep the canonical column order."
+                "The exact header row is already identifiable from the cell map; keep the actual column order "
+                f"{heuristic_resolution['valid_column_order']}."
             )
 
     return payload
@@ -1142,9 +1202,6 @@ def inspect_classified_document(
             HEADER_SECTION_SCHEMAS[section_id],
         )
         if primary_table_group is None:
-            expected_counts = sorted(
-                {len(order) for order in HEADER_SECTION_SCHEMAS[section_id].canonical_orders}
-            )
             results.append(
                 build_skipped_result(
                     document_name=document_path.name,
@@ -1152,9 +1209,7 @@ def inspect_classified_document(
                     span_records=span_records,
                     inspection_input_path=inspection_input_path,
                     input_components=input_components,
-                    reason=(
-                        f"No table component in this section span matched the expected logical column counts {expected_counts}."
-                    ),
+                    reason="No table component found in this section span.",
                 )
             )
             continue

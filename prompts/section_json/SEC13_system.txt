@@ -1,17 +1,15 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object.
 
 Section: SEC13 — الإجراءات الرقابية (Control Procedures)
 
-This section contains internal control checkpoints, audit review steps, and supervisory activities for the procedure. It is structurally similar to SEC12 but smaller (typically 5–15 rows). It has the heading "الإجراءات الرقابية" and uses the same 2-column layout as SEC12 (Steps | Responsible Party), though the content focuses on controls, reviews, and approval checks rather than operational workflow steps.
+This section contains internal control checkpoints, audit review steps, and supervisory activities for the procedure. It is structurally similar to SEC12 but smaller (typically 5–15 rows). It has the heading "الإجراءات الرقابية" (or equivalent in the document's language) and uses the same layout as SEC12 (Steps | Responsible Party), though the content focuses on controls, reviews, and approval checks rather than operational workflow steps.
 
 Typical structure:
-1. Full-width section heading row: "N. الإجراءات الرقابية [#xxxxxx]"
-2. One or more full-width sub-heading rows naming a specific control context (e.g., "<strong>الإجراءات الرقابية (فتح الحسابات)</strong> [#xxxxxx]")
-3. Two-column control step rows: left cell = control step, right cell = responsible reviewer/controller
+1. Full-width section heading row: e.g., "N. الإجراءات الرقابية [#xxxxxx]" or "N. Control Procedures [#xxxxxx]"
+2. One or more full-width sub-heading rows naming a specific control context.
+3. Step rows: one cell per column (control action, responsible reviewer, and any additional columns).
 
-The column headers are the same as SEC12 (الخطوات | المكلف بالتنفيذ), colored and typically hidden (appear as CL IDs). Use the column header inspection result to determine column labels.
-
-Canonical column order (from column header inspection): ["الخطوات", "المكلف بالتنفيذ"]
+The column headers may be hidden (appear as CL IDs) or visible and may be in Arabic or English. Use the column header inspection result to determine the exact column labels.
 
 Note: Some documents have a very short SEC13 (just a heading + one CL reference), while others have a richer set of control steps.
 
@@ -25,9 +23,9 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC13.
-- SEC13 begins at the "الإجراءات الرقابية" heading row and ends when the next canonical section heading appears (e.g., "التقارير والكشوفات", "الملفات ومدد الحفظ", etc.) or the table ends.
+- SEC13 begins at the section heading row and ends when the next canonical section heading appears or the table ends.
 - Full-width rows: section heading, control sub-headings.
-- Two-column step rows: left = control step, right = responsible party.
+- Step rows: one cell per column (control step, responsible party, etc.).
 - Color codes, HTML tags, ASCII borders.
 
 ---
@@ -38,7 +36,7 @@ Return only valid JSON with this exact structure:
 {
   "section_id": "SEC13",
   "section_heading": "<heading text as it appears>",
-  "columns": ["الخطوات", "المكلف بالتنفيذ"],
+  "columns": ["<col1 label>", "<col2 label>"],
   "header_cell_ids": ["CL000...", "CL000..."],
   "entries": [
     {
@@ -47,22 +45,24 @@ Return only valid JSON with this exact structure:
     },
     {
       "type": "step",
-      "الخطوات": "<value or CL ID>",
-      "المكلف بالتنفيذ": "<value or CL ID>"
+      "<col1 label>": "<value or CL ID>",
+      "<col2 label>": "<value or CL ID>"
     }
   ]
 }
 
+For tables with more than 2 columns, include all columns in the "columns" array and all corresponding keys in each step entry.
+
 Entry types:
-- "subgroup_header": a full-width row naming the specific control context or sub-block (e.g., "الإجراءات الرقابية (فتح الحسابات)"). Also applies to any intermediate bold headings within the section.
-- "step": a 2-column row with a control action and a responsible party.
+- "subgroup_header": a full-width row naming the specific control context or sub-block. Also applies to any intermediate bold headings within the section.
+- "step": a multi-column row with a control action and a responsible party (and any additional columns).
 
 Simple variant (single content cell, no step rows):
-If SEC13 contains only the heading and one CL reference (no proper 2-column rows), use:
+If SEC13 contains only the heading and one CL reference (no proper multi-column rows), use:
 {
   "section_id": "SEC13",
   "section_heading": "<heading text>",
-  "columns": ["الخطوات", "المكلف بالتنفيذ"],
+  "columns": ["<col1 label>", "<col2 label>"],
   "header_cell_ids": [],
   "entries": [
     {
@@ -73,18 +73,18 @@ If SEC13 contains only the heading and one CL reference (no proper 2-column rows
 }
 
 Rules:
-- "columns" must exactly match the resolved valid_column_order from the inspection result.
+- "columns" must exactly match the resolved valid_column_order from the inspection result. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" lists actual header cell IDs from the inspection result, or [] if absent.
 - Do NOT include the column header row cells in the "entries" list.
 - Preserve all cell IDs (CL000XXX) exactly.
-- Preserve text exactly including bold tags, color codes, Arabic text.
+- Preserve text exactly including bold tags, color codes, and original language.
 - Preserve exact document order of all entries.
 - Do NOT include content from SEC12 or other sections.
 - If additional free-form text appears in the input that belongs to this section but doesn't fit into any defined entry type, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.
 - If SEC13 content is not found in the input, return {"section_id": "SEC13", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output:
+Example output (Arabic document):
 {
   "section_id": "SEC13",
   "section_heading": "9. الإجراءات الرقابية [#243744]",
@@ -104,6 +104,25 @@ Example output:
       "type": "step",
       "الخطوات": "CL000325",
       "المكلف بالتنفيذ": "CL000326"
+    }
+  ]
+}
+
+Example output (English document):
+{
+  "section_id": "SEC13",
+  "section_heading": "9. Control Procedures [#243744]",
+  "columns": ["Steps", "Action Owner"],
+  "header_cell_ids": ["CL000321", "CL000322"],
+  "entries": [
+    {
+      "type": "subgroup_header",
+      "heading": "<strong>IT Onboarding Controls</strong> [#243744]"
+    },
+    {
+      "type": "step",
+      "Steps": "CL000323",
+      "Action Owner": "CL000324"
     }
   ]
 }
