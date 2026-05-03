@@ -34,6 +34,11 @@ Identifying full-width vs. step rows:
 - A row with cells spanning the entire table width is a header/group row.
 - A row with multiple separate cells (one per column) is a step row.
 
+Repeated structural rows to skip:
+Some documents repeat structural rows mid-table as a formatting artifact (e.g., when a new sub-table begins in the source Word document). Skip any row — regardless of position — that matches either of the following patterns:
+- A full-width row whose text is just the section title (e.g., "الإجراء", "Procedure", or a close variant), with no numbering prefix and no meaningful sub-process name. The real section heading only appears once at the very start with a numeric prefix (e.g., "5. الإجراء [#222A35]"); any bare repetition of the section name mid-table is structural noise.
+- A multi-cell row whose cells contain only column header labels (e.g., "الخطوات" / "المكلف بالتنفيذ", "Steps" / "Action Owner", or their bold/colored variants). The actual column header row is already captured in "header_cell_ids"; any subsequent appearance of the same labels is a duplicate and must be omitted from entries entirely.
+
 ---
 OUTPUT FORMAT
 
@@ -76,7 +81,8 @@ Distinguishing group_header vs. subgroup_header:
 Rules:
 - "columns" must exactly match the resolved valid_column_order from the column header inspection result. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" must list the actual header cell IDs from the inspection result (left to right). If no header row exists, set "header_cell_ids" to [].
-- Do NOT include the column header row cells in the "entries" list.
+- Do NOT include the column header row cells in the "entries" list. If identical column header labels appear again mid-table (bare "الخطوات" / "المكلف بالتنفيذ" or their equivalents, possibly bold or colored), skip those rows entirely.
+- Do NOT include bare repetitions of the section title (e.g., a full-width "الإجراء" or "Procedure" row with no numeric prefix) that appear mid-table after the opening heading. These are structural artifacts and must be omitted.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including bold tags, color codes, and original language.
 - Preserve exact document order of all entries.
