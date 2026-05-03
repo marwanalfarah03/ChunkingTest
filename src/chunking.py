@@ -39,6 +39,9 @@ INVISIBLE_TEXT_CHAR_PATTERN = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a
 ASSET_REFERENCE_PATTERN = re.compile(r"<(EM\d{6})>")
 TABLE_REFERENCE_PATTERN = re.compile(r"<TB\d{6}>")
 CELL_REFERENCE_PATTERN = re.compile(r"\bCL\d{6}\b")
+SPREADSHEET_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+SPREADSHEET_WORKBOOK_XML = "xl/workbook.xml"
+HIDDEN_WORKBOOK_VIEW_STATES = {"hidden", "veryhidden"}
 
 
 @dataclass
@@ -662,6 +665,53 @@ def apply_extension_to_name(value: str, extension: str | None, fallback_stem: st
     return sanitize_asset_filename(f"{base_name}{extension}")
 
 
+def normalize_workbook_view_visibility(workbook_xml: bytes) -> bytes:
+    try:
+        root = ET.fromstring(workbook_xml)
+    except ET.ParseError:
+        return workbook_xml
+
+    changed = False
+    for workbook_view in root.findall(f".//{{{SPREADSHEET_MAIN_NS}}}workbookView"):
+        visibility = str(workbook_view.get("visibility") or "").lower()
+        if visibility in HIDDEN_WORKBOOK_VIEW_STATES:
+            workbook_view.set("visibility", "visible")
+            changed = True
+
+    if not changed:
+        return workbook_xml
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def normalize_spreadsheet_workbook_visibility(raw_bytes: bytes) -> bytes:
+    if not raw_bytes.startswith(b"PK\x03\x04"):
+        return raw_bytes
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as source_archive:
+            names = set(source_archive.namelist())
+            if "[Content_Types].xml" not in names or SPREADSHEET_WORKBOOK_XML not in names:
+                return raw_bytes
+
+            workbook_xml = source_archive.read(SPREADSHEET_WORKBOOK_XML)
+            normalized_workbook_xml = normalize_workbook_view_visibility(workbook_xml)
+            if normalized_workbook_xml == workbook_xml:
+                return raw_bytes
+
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as destination_archive:
+                destination_archive.comment = source_archive.comment
+                for item in source_archive.infolist():
+                    if item.filename == SPREADSHEET_WORKBOOK_XML:
+                        item_bytes = normalized_workbook_xml
+                    else:
+                        item_bytes = source_archive.read(item.filename)
+                    destination_archive.writestr(item, item_bytes)
+            return output.getvalue()
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return raw_bytes
+
+
 def find_ole_native_stream_path(ole: object) -> list[str] | None:
     for stream_path in ole.listdir():
         if stream_path and stream_path[-1] == "\x01Ole10Native":
@@ -762,6 +812,7 @@ def export_relationship_asset(asset_context: AssetExportContext, rel_id: str, pr
         if extracted_asset is not None:
             original_name, stored_bytes, extracted_content_type = extracted_asset
             effective_content_type = extracted_content_type or effective_content_type
+        stored_bytes = normalize_spreadsheet_workbook_visibility(stored_bytes)
 
     asset_id = next_asset_id(asset_context.counters)
     stored_name = build_stored_asset_name(asset_context.output_dir, original_name)
