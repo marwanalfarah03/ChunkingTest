@@ -409,15 +409,27 @@ async function loadAssets() {
   assetsList.innerHTML = assets.map((asset) => {
     const assetId = String(asset.id);
     const label = asset.name || assetId;
+    const downloadName = asset.download_name || label;
+    const isImage = asset.kind === 'image' || String(asset.content_type || '').startsWith('image/');
+    const typeLabel = (() => {
+      const ext = String(downloadName).split('.').pop();
+      if (ext && ext !== downloadName) return ext.toUpperCase();
+      const contentType = String(asset.content_type || '');
+      if (contentType.includes('/')) return contentType.split('/').pop().toUpperCase();
+      return String(asset.kind || 'FILE').toUpperCase();
+    })();
+    const preview = isImage
+      ? `<img src="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}"
+             alt="${escHtml(assetId)}"
+             data-asset-preview>`
+      : `<div class="hist-asset-placeholder">${escHtml(typeLabel)}</div>`;
     return `
     <div class="hist-asset-card">
       <div class="hist-asset-preview">
-        <img src="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}"
-             alt="${escHtml(assetId)}"
-             data-asset-preview>
+        ${preview}
       </div>
       <div class="hist-asset-name" title="${escHtml(label)}">${escHtml(label)}</div>
-      <a class="hist-asset-dl" href="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}" download>&#8659;</a>
+      <a class="hist-asset-dl" href="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}" download="${escHtml(downloadName)}">&#8659;</a>
     </div>
   `;
   }).join('');

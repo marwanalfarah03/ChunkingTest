@@ -36,6 +36,9 @@ DEFAULT_CELL_MAP_NAME = "schema_cell_map.json"
 DEFAULT_ASSET_MAP_NAME = "schema_asset_map.json"
 PRESERVED_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
 INVISIBLE_TEXT_CHAR_PATTERN = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060\ufeff]")
+ASSET_REFERENCE_PATTERN = re.compile(r"<(EM\d{6})>")
+TABLE_REFERENCE_PATTERN = re.compile(r"<TB\d{6}>")
+CELL_REFERENCE_PATTERN = re.compile(r"\bCL\d{6}\b")
 
 
 @dataclass
@@ -1490,13 +1493,81 @@ def build_cell_map(entries: Iterable[ParagraphEntry | TableEntry], table_grids: 
     return cell_map
 
 
-def build_asset_map(asset_context: AssetExportContext | None) -> OrderedDict[str, dict[str, object]]:
+def clean_asset_label_text(value: str) -> str:
+    cleaned = PRESERVED_FORMATTING_TAG_PATTERN.sub("", value or "")
+    cleaned = INVISIBLE_TEXT_CHAR_PATTERN.sub("", cleaned)
+    cleaned = TABLE_REFERENCE_PATTERN.sub(" ", cleaned)
+    cleaned = CELL_REFERENCE_PATTERN.sub(" ", cleaned)
+    cleaned = ASSET_REFERENCE_PATTERN.sub(" ", cleaned)
+    lines = [normalize_whitespace(line) for line in cleaned.splitlines()]
+    lines = [line for line in lines if line]
+    return " ".join(lines).strip()
+
+
+def nearest_asset_label_in_text(text: str, asset_id: str) -> str:
+    token = f"<{asset_id}>"
+    if token not in text:
+        return ""
+
+    before, _, after = text.partition(token)
+    before_lines = [normalize_whitespace(line) for line in clean_asset_label_text(before).splitlines() if normalize_whitespace(line)]
+    if before_lines:
+        return before_lines[-1]
+
+    after_lines = [normalize_whitespace(line) for line in clean_asset_label_text(after).splitlines() if normalize_whitespace(line)]
+    if after_lines:
+        return after_lines[0]
+
+    return clean_asset_label_text(text)
+
+
+def derive_asset_display_names(cell_map: OrderedDict[str, dict[str, object]]) -> dict[str, str]:
+    by_row: dict[tuple[str, int], list[dict[str, object]]] = {}
+    for cell in cell_map.values():
+        table_id = str(cell.get("table_id") or "")
+        row = int(cell.get("row") or 0)
+        by_row.setdefault((table_id, row), []).append(cell)
+
+    candidates: dict[str, list[str]] = {}
+    for cell in cell_map.values():
+        text = str(cell.get("text") or "")
+        asset_ids = ASSET_REFERENCE_PATTERN.findall(text)
+        if not asset_ids:
+            continue
+
+        table_id = str(cell.get("table_id") or "")
+        row = int(cell.get("row") or 0)
+        row_cells = by_row.get((table_id, row), [])
+        row_context = [
+            clean_asset_label_text(str(candidate.get("text") or ""))
+            for candidate in row_cells
+            if candidate is not cell
+        ]
+        row_context = [candidate for candidate in row_context if candidate]
+
+        for asset_id in asset_ids:
+            inline_label = nearest_asset_label_in_text(text, asset_id)
+            if inline_label:
+                candidates.setdefault(asset_id, []).append(inline_label)
+                continue
+            if row_context:
+                candidates.setdefault(asset_id, []).append(row_context[0])
+
+    return {asset_id: labels[0] for asset_id, labels in candidates.items() if labels}
+
+
+def build_asset_map(
+    asset_context: AssetExportContext | None,
+    cell_map: OrderedDict[str, dict[str, object]] | None = None,
+) -> OrderedDict[str, dict[str, object]]:
     asset_map: OrderedDict[str, dict[str, object]] = OrderedDict()
     if asset_context is None:
         return asset_map
+    display_names = derive_asset_display_names(cell_map or OrderedDict())
     for asset_id, asset in asset_context.assets_by_id.items():
         asset_map[asset_id] = {
             "kind": asset.kind,
+            "display_name": display_names.get(asset_id) or None,
             "original_name": asset.original_name,
             "stored_name": asset.stored_name,
             "relative_path": asset.relative_path,
@@ -1627,11 +1698,15 @@ def build_export_artifacts(docx_path: Path, asset_output_dir: Path, asset_relati
         e for e in entries if isinstance(e, ParagraphEntry)
     ] + all_table_entries
 
+    table_map = build_table_map(map_entries)
+    cell_map = build_cell_map(map_entries, table_grids)
+    asset_map = build_asset_map(asset_context, cell_map)
+
     return ExportArtifacts(
         chunks=chunks,
-        table_map=build_table_map(map_entries),
-        cell_map=build_cell_map(map_entries, table_grids),
-        asset_map=build_asset_map(asset_context),
+        table_map=table_map,
+        cell_map=cell_map,
+        asset_map=asset_map,
     )
 
 

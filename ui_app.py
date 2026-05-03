@@ -160,6 +160,7 @@ def history_asset_list(artifact_dir: Path | None) -> list[dict[str, str]]:
             "id": str(asset_id),
             "kind": str(asset.get("kind") or ""),
             "name": asset_display_name(asset, str(asset_id)),
+            "download_name": asset_download_name(asset, str(asset_id)),
             "content_type": str(asset.get("content_type") or ""),
         })
     return assets
@@ -236,14 +237,43 @@ def repair_text(value: Any) -> str:
 
 
 def asset_display_name(asset: dict[str, Any], asset_id: str) -> str:
-    original_name = repair_text(asset.get("original_name"))
-    if original_name.strip():
-        candidate = original_name
+    display_name = repair_text(asset.get("display_name"))
+    if display_name.strip():
+        candidate = display_name
     else:
-        stored_name = repair_text(asset.get("stored_name"))
-        candidate = LEGACY_ASSET_PREFIX_RE.sub("", Path(stored_name).name) if stored_name else asset_id
+        original_name = repair_text(asset.get("original_name"))
+        if original_name.strip():
+            candidate = original_name
+        else:
+            stored_name = repair_text(asset.get("stored_name"))
+            candidate = LEGACY_ASSET_PREFIX_RE.sub("", Path(stored_name).name) if stored_name else asset_id
     candidate = re.sub(r"[\r\n]+", " ", candidate).strip()
     return Path(candidate).name or asset_id
+
+
+def asset_download_name(asset: dict[str, Any], asset_id: str) -> str:
+    label = asset_display_name(asset, asset_id)
+    if Path(label).suffix:
+        return label
+
+    for key in ("original_name", "stored_name"):
+        source_name = repair_text(asset.get(key))
+        suffix = Path(Path(source_name).name).suffix if source_name else ""
+        if suffix:
+            safe_label = re.sub(r'[\\/:*?"<>|]+', "_", label).strip() or asset_id
+            return f"{safe_label}{suffix}"
+    return re.sub(r'[\\/:*?"<>|]+', "_", label).strip() or asset_id
+
+
+def build_download_content_disposition(filename: str, fallback_stem: str = "asset") -> str:
+    suffix = Path(filename).suffix
+    ascii_filename = re.sub(r"[^\x20-\x7e]", "_", Path(filename).name)
+    ascii_filename = re.sub(r"\s+", " ", ascii_filename).strip(" .")
+    ascii_stem = Path(ascii_filename).stem.strip(" ._")
+    if not ascii_stem:
+        ascii_filename = f"{fallback_stem}{suffix}"
+    encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+    return f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
 
 
 def resolve_asset_file_path(artifact_dir: Path, asset: dict[str, Any]) -> Path:
@@ -269,9 +299,12 @@ def send_asset_response(artifact_dir: Path, asset: dict[str, Any], asset_id: str
     if kind == "image" or content_type.startswith("image/"):
         return send_file(asset_path, **send_kwargs)
 
+    download_name = asset_download_name(asset, asset_id)
     send_kwargs["as_attachment"] = True
-    send_kwargs["download_name"] = asset_display_name(asset, asset_id)
-    return send_file(asset_path, **send_kwargs)
+    send_kwargs["download_name"] = Path(download_name).name or f"asset{Path(download_name).suffix}"
+    response = send_file(asset_path, **send_kwargs)
+    response.headers["Content-Disposition"] = build_download_content_disposition(download_name)
+    return response
 
 
 def dominant_direction(value: Any) -> str:
@@ -500,11 +533,12 @@ class DocumentRenderer:
         if not isinstance(asset, dict):
             return f'<span class="asset-missing">Embedded file {escape(asset_id)}</span>'
         label = asset_display_name(asset, asset_id)
+        download_name = asset_download_name(asset, asset_id)
         content_type = str(asset.get("content_type") or "")
         url = f"{self.asset_url_prefix}/{escape(asset_id)}"
         if content_type.startswith("image/"):
             return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}">' f'<figcaption>{escape(label)}</figcaption></figure>'
-        return f'<a class="embedded-file" href="{url}" download="{escape(label)}"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
+        return f'<a class="embedded-file" href="{url}" download="{escape(download_name)}"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
 
     def cells_for_table(self, table_id: str) -> list[dict[str, Any]]:
         cells: list[dict[str, Any]] = []
