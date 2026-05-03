@@ -459,7 +459,7 @@ def main() -> int:
     document_prediction_context: list[tuple[str, list[str]]] = []
 
     for index, target in enumerate(targets, start=1):
-        if not target.raw_text.strip():
+        if not any(c.isalnum() for c in target.raw_text):
             results.append(
                 {
                     "document_name": target.document_name,

@@ -1781,7 +1781,7 @@ def run_classification_step(job: UiJob, llm_logger: LlmLogger | None = None) -> 
     document_prediction_context: list[tuple[str, list[str]]] = []
     for index, target in enumerate(targets, start=1):
         job.set_progress(current=index - 1, total=len(targets), detail=f"Reading part {index} of {len(targets)}")
-        if not target.raw_text.strip():
+        if not any(c.isalnum() for c in target.raw_text):
             results.append({
                 "document_name": target.document_name,
                 "txt_file_name": target.txt_file_name,
