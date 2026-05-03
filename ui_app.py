@@ -41,6 +41,7 @@ CL_TOKEN_RE = re.compile(r"CL\d{6}")
 TB_TOKEN_RE = re.compile(r"<TB\d{6}>")
 EM_TOKEN_RE = re.compile(r"<EM\d{6}>")
 REFERENCE_TOKEN_RE = re.compile(r"(CL\d{6}|<TB\d{6}>|<EM\d{6}>)")
+LEGACY_ASSET_PREFIX_RE = re.compile(r"^EM\d{6}_")
 COLOR_TOKEN_RE = re.compile(r"\s*\[#([0-9A-Fa-f]{6})\]\s*")
 RTL_CHAR_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 LTR_CHAR_RE = re.compile(r"[A-Za-z]")
@@ -158,7 +159,7 @@ def history_asset_list(artifact_dir: Path | None) -> list[dict[str, str]]:
         assets.append({
             "id": str(asset_id),
             "kind": str(asset.get("kind") or ""),
-            "name": repair_text(asset.get("original_name") or asset.get("stored_name") or asset_id),
+            "name": asset_display_name(asset, str(asset_id)),
             "content_type": str(asset.get("content_type") or ""),
         })
     return assets
@@ -232,6 +233,45 @@ def repair_text(value: Any) -> str:
         if text_quality(candidate) > text_quality(best):
             best = candidate
     return best.replace("\uf0b7", "•").replace("\uf0a7", "▪").replace("\u00a0", " ")
+
+
+def asset_display_name(asset: dict[str, Any], asset_id: str) -> str:
+    original_name = repair_text(asset.get("original_name"))
+    if original_name.strip():
+        candidate = original_name
+    else:
+        stored_name = repair_text(asset.get("stored_name"))
+        candidate = LEGACY_ASSET_PREFIX_RE.sub("", Path(stored_name).name) if stored_name else asset_id
+    candidate = re.sub(r"[\r\n]+", " ", candidate).strip()
+    return Path(candidate).name or asset_id
+
+
+def resolve_asset_file_path(artifact_dir: Path, asset: dict[str, Any]) -> Path:
+    relative_path = Path(str(asset.get("relative_path") or ""))
+    asset_path = (artifact_dir / relative_path).resolve()
+    try:
+        asset_path.relative_to(artifact_dir.resolve())
+    except ValueError as exc:
+        raise ValueError("Asset path is invalid.") from exc
+    return asset_path
+
+
+def send_asset_response(artifact_dir: Path, asset: dict[str, Any], asset_id: str) -> Response:
+    asset_path = resolve_asset_file_path(artifact_dir, asset)
+    if not asset_path.exists():
+        raise FileNotFoundError(asset_path)
+
+    content_type = str(asset.get("content_type") or "")
+    kind = str(asset.get("kind") or "")
+    send_kwargs: dict[str, Any] = {}
+    if content_type:
+        send_kwargs["mimetype"] = content_type
+    if kind == "image" or content_type.startswith("image/"):
+        return send_file(asset_path, **send_kwargs)
+
+    send_kwargs["as_attachment"] = True
+    send_kwargs["download_name"] = asset_display_name(asset, asset_id)
+    return send_file(asset_path, **send_kwargs)
 
 
 def dominant_direction(value: Any) -> str:
@@ -399,7 +439,7 @@ class DocumentRenderer:
             elif EM_TOKEN_RE.fullmatch(part):
                 asset = self.asset_map.get(part[1:-1])
                 if isinstance(asset, dict):
-                    parts.append(repair_text(asset.get("original_name") or asset.get("stored_name") or part))
+                    parts.append(asset_display_name(asset, part[1:-1]))
                 else:
                     parts.append(part)
             else:
@@ -459,12 +499,12 @@ class DocumentRenderer:
         asset = self.asset_map.get(asset_id)
         if not isinstance(asset, dict):
             return f'<span class="asset-missing">Embedded file {escape(asset_id)}</span>'
-        label = repair_text(asset.get("original_name") or asset.get("stored_name") or asset_id)
+        label = asset_display_name(asset, asset_id)
         content_type = str(asset.get("content_type") or "")
         url = f"{self.asset_url_prefix}/{escape(asset_id)}"
         if content_type.startswith("image/"):
             return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}">' f'<figcaption>{escape(label)}</figcaption></figure>'
-        return f'<a class="embedded-file" href="{url}" target="_blank" rel="noopener"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
+        return f'<a class="embedded-file" href="{url}" download="{escape(label)}"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
 
     def cells_for_table(self, table_id: str) -> list[dict[str, Any]]:
         cells: list[dict[str, Any]] = []
@@ -1872,15 +1912,12 @@ def api_asset(job_id: str, asset_id: str) -> Response:
     asset = asset_map.get(asset_id)
     if not isinstance(asset, dict):
         return jsonify({"error": "Asset not found."}), 404
-    relative_path = Path(str(asset.get("relative_path") or ""))
-    asset_path = (job.artifact_dir / relative_path).resolve()
     try:
-        asset_path.relative_to(job.artifact_dir.resolve())
+        return send_asset_response(job.artifact_dir, asset, asset_id)
     except ValueError:
         return jsonify({"error": "Asset path is invalid."}), 400
-    if not asset_path.exists():
+    except FileNotFoundError:
         return jsonify({"error": "Asset not found."}), 404
-    return send_file(asset_path)
 
 
 @app.post("/api/reset")
@@ -2129,15 +2166,12 @@ def api_history_asset(doc_id: str, asset_id: str) -> Response:
     asset = asset_map.get(asset_id)
     if not isinstance(asset, dict):
         return jsonify({"error": "Asset not found."}), 404
-    relative_path = Path(str(asset.get("relative_path") or ""))
-    asset_path = (artifact_dir / relative_path).resolve()
     try:
-        asset_path.relative_to(artifact_dir.resolve())
+        return send_asset_response(artifact_dir, asset, asset_id)
     except ValueError:
         return jsonify({"error": "Asset path is invalid."}), 400
-    if not asset_path.exists():
+    except FileNotFoundError:
         return jsonify({"error": "Asset not found."}), 404
-    return send_file(asset_path)
 
 
 @app.get("/api/history/<doc_id>/download/<which>")

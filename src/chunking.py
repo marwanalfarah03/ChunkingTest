@@ -602,6 +602,18 @@ def sanitize_asset_filename(value: str) -> str:
     return cleaned or "asset.bin"
 
 
+def build_stored_asset_name(output_dir: Path, original_name: str) -> str:
+    base_name = sanitize_asset_filename(Path(original_name or "").name)
+    suffix = "".join(Path(base_name).suffixes)
+    stem = (base_name[: -len(suffix)] if suffix else base_name) or "asset"
+    candidate = base_name
+    index = 2
+    while (output_dir / candidate).exists():
+        candidate = f"{stem}_{index}{suffix}" if suffix else f"{stem}_{index}"
+        index += 1
+    return candidate
+
+
 def guess_content_type(value: str) -> str | None:
     content_type, _ = mimetypes.guess_type(value, strict=False)
     return content_type
@@ -749,7 +761,7 @@ def export_relationship_asset(asset_context: AssetExportContext, rel_id: str, pr
             effective_content_type = extracted_content_type or effective_content_type
 
     asset_id = next_asset_id(asset_context.counters)
-    stored_name = f"{asset_id}_{sanitize_asset_filename(original_name)}"
+    stored_name = build_stored_asset_name(asset_context.output_dir, original_name)
     destination_path = asset_context.output_dir / stored_name
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     with destination_path.open("wb") as destination_handle:
