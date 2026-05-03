@@ -11,6 +11,8 @@ from typing import Any, Callable
 
 from openai import NotFoundError, OpenAI
 
+from chunking import EMPTY_TABLE_SENTINEL
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROMPT_PATH = PROJECT_ROOT / "prompts" / "classification" / "chunk_classification_system.txt"
@@ -459,7 +461,7 @@ def main() -> int:
     document_prediction_context: list[tuple[str, list[str]]] = []
 
     for index, target in enumerate(targets, start=1):
-        if not any(c.isalnum() for c in target.raw_text):
+        if not target.raw_text.strip() or target.raw_text.strip() == EMPTY_TABLE_SENTINEL or not any(c.isalnum() for c in target.raw_text):
             results.append(
                 {
                     "document_name": target.document_name,

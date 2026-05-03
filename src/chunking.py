@@ -34,6 +34,7 @@ DEFAULT_SOURCE_DOCX_NAME = "source.docx"
 DEFAULT_TABLE_MAP_NAME = "schema_table_map.json"
 DEFAULT_CELL_MAP_NAME = "schema_cell_map.json"
 DEFAULT_ASSET_MAP_NAME = "schema_asset_map.json"
+EMPTY_TABLE_SENTINEL = "(empty table)"
 PRESERVED_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
 INVISIBLE_TEXT_CHAR_PATTERN = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060\ufeff]")
 ASSET_REFERENCE_PATTERN = re.compile(r"<(EM\d{6})>")
@@ -1408,7 +1409,7 @@ def render_content_rows(table_grid: TableGrid, widths: list[int], row_index: int
 
 def render_ascii_table(table_grid: TableGrid) -> str:
     if table_grid.row_count == 0 or table_grid.column_count == 0:
-        return "(empty table)"
+        return EMPTY_TABLE_SENTINEL
 
     widths = compute_column_widths(table_grid)
     lines = [render_horizontal_boundary(table_grid, widths, 0)]
