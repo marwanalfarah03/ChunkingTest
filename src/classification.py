@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 from openai import NotFoundError, OpenAI
 
@@ -215,6 +216,7 @@ def request_prediction(
     model: str,
     max_json_retries: int,
     previous_predictions: list[tuple[str, list[str]]] | None = None,
+    log_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[list[str], int, list[dict[str, str]]]:
     user_prompt = build_user_prompt(target, previous_predictions=previous_predictions)
     messages: list[dict[str, str]] = [
@@ -225,6 +227,7 @@ def request_prediction(
     invalid_count = 0
 
     while True:
+        sent_messages = list(messages)
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -241,16 +244,41 @@ def request_prediction(
 
         try:
             predicted_sections = parse_prediction_payload(response_text)
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "classify",
+                    "subject": target.txt_file_name,
+                    "model": model,
+                    "attempt": invalid_count + 1,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": True,
+                    "error": None,
+                })
             return predicted_sections, invalid_count, invalid_attempts
         except ValueError as exc:
             invalid_count += 1
+            error_str = str(exc)
             invalid_attempts.append(
                 {
                     "attempt": str(invalid_count),
-                    "error": str(exc),
+                    "error": error_str,
                     "response": response_text,
                 }
             )
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "classify",
+                    "subject": target.txt_file_name,
+                    "model": model,
+                    "attempt": invalid_count,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": False,
+                    "error": error_str,
+                })
 
             if max_json_retries > 0 and invalid_count >= max_json_retries:
                 raise RuntimeError(

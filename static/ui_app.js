@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   latest: null,
   reviewItems: [],
   sectionOptions: [],
@@ -15,6 +15,7 @@ const uploadPanel = el('uploadPanel');
 const statusPanel = el('statusPanel');
 const reviewPanel = el('reviewPanel');
 const finalPanel = el('finalPanel');
+const failedPanel = el('failedPanel');
 const stepList = el('stepList');
 const progressBar = el('progressBar');
 const progressPercent = el('progressPercent');
@@ -30,6 +31,10 @@ const continueButton = el('continueButton');
 const finalDocument = el('finalDocument');
 const downloadButton = el('downloadButton');
 const downloadTxtButton = el('downloadTxtButton');
+const newJobButton = el('newJobButton');
+const retryButton = el('retryButton');
+const failedTitle = el('failedTitle');
+const failedDetail = el('failedDetail');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -42,7 +47,7 @@ function escapeHtml(value) {
 
 function textDirection(value) {
   const text = String(value ?? '');
-  const rtl = (text.match(/[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]/g) || []).length;
+  const rtl = (text.match(/[֐-ࣿיִ-﷽ﹰ-ﻼ]/g) || []).length;
   const ltr = (text.match(/[A-Za-z]/g) || []).length;
   if (!rtl) return 'ltr';
   if (!ltr) return 'rtl';
@@ -216,6 +221,23 @@ async function loadFinal() {
   state.finalLoaded = true;
 }
 
+async function resetAndShowUpload() {
+  await fetch('/api/reset', { method: 'POST' });
+  state.finalLoaded = false;
+  finalDocument.innerHTML = '';
+  show(uploadPanel, true);
+  show(statusPanel, false);
+  show(reviewPanel, false);
+  show(finalPanel, false);
+  show(failedPanel, false);
+  startButton.disabled = false;
+  startButton.textContent = 'Start';
+  uploadError.textContent = '';
+}
+
+newJobButton.addEventListener('click', resetAndShowUpload);
+retryButton.addEventListener('click', resetAndShowUpload);
+
 function applySnapshot(snapshot) {
   state.latest = snapshot;
   renderSteps(snapshot.steps || []);
@@ -225,16 +247,18 @@ function applySnapshot(snapshot) {
   const idle = snapshot.status === 'idle';
   const awaitingReview = snapshot.status === 'awaiting_review';
   const completed = snapshot.status === 'completed';
-  const working = !idle && !awaitingReview && !completed;
+  const failed = snapshot.status === 'failed';
+  const working = !idle && !awaitingReview && !completed && !failed;
 
   show(uploadPanel, idle);
-  show(statusPanel, working || snapshot.status === 'failed');
+  show(statusPanel, working);
   show(reviewPanel, awaitingReview);
   show(finalPanel, completed);
+  show(failedPanel, failed);
 
-  if (snapshot.status === 'failed') {
-    statusTitle.textContent = 'Stopped';
-    statusDetail.textContent = snapshot.error || 'The process stopped.';
+  if (failed) {
+    failedTitle.textContent = snapshot.phase_label || 'Stopped';
+    failedDetail.textContent = snapshot.error || 'The process stopped unexpectedly.';
   }
 
   if (awaitingReview) {

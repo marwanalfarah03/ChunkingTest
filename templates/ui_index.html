@@ -15,6 +15,7 @@
           <p>Capital Bank</p>
           <h1>SOP Builder</h1>
         </div>
+        <a href="/history" class="history-nav-btn" title="View history">&#128196;</a>
       </div>
       <div class="progress-card">
         <div class="progress-meta">
@@ -90,11 +91,22 @@
             <h2>Final document</h2>
           </div>
           <div class="download-actions">
+            <button id="newJobButton" class="secondary-button" type="button">&#43; New document</button>
             <button id="downloadTxtButton" class="secondary-button" type="button">Download RAG TXT</button>
             <button id="downloadButton" class="secondary-button" type="button">Download JSON</button>
           </div>
         </div>
         <div id="finalDocument" class="final-output"></div>
+      </section>
+
+      <section id="failedPanel" class="failed-panel hidden">
+        <p class="eyebrow">Processing stopped</p>
+        <h2 id="failedTitle">An error occurred</h2>
+        <p id="failedDetail"></p>
+        <div class="failed-actions">
+          <button id="retryButton" class="primary-button" type="button">&#43; Try another document</button>
+          <a href="/history" class="secondary-button">View history</a>
+        </div>
       </section>
     </main>
   </div>

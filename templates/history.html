@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>History — CBOJ SOP Builder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='history_styles.css') }}">
+</head>
+<body class="history-page">
+  <div class="hist-shell">
+
+    <!-- Sidebar: document list -->
+    <aside class="hist-sidebar">
+      <div class="hist-sidebar-head">
+        <div class="brand-card hist-brand">
+          <div class="brand-mark">CB</div>
+          <div>
+            <p>Capital Bank</p>
+            <h1>SOP Builder</h1>
+          </div>
+        </div>
+        <a href="/" class="hist-back-btn">&#8592; Builder</a>
+      </div>
+      <div class="hist-sidebar-title">
+        <p class="eyebrow">Processed documents</p>
+        <span id="docCount" class="hist-doc-count">0 documents</span>
+      </div>
+      <div id="docList" class="hist-doc-list">
+        <div class="hist-empty">Loading…</div>
+      </div>
+    </aside>
+
+    <!-- Main: document detail -->
+    <main class="hist-main" id="histMain">
+      <div class="hist-welcome" id="histWelcome">
+        <div class="hist-welcome-icon">&#128196;</div>
+        <h2>Select a document to view its details</h2>
+        <p>All processed documents are listed on the left. Click one to explore its artifacts, logs, and output.</p>
+        <a href="/" class="primary-button">&#43; Process a new document</a>
+      </div>
+
+      <!-- Document detail (hidden until a doc is selected) -->
+      <div class="hist-detail hidden" id="histDetail">
+
+        <!-- Detail header -->
+        <div class="hist-detail-header">
+          <div class="hist-detail-title-row">
+            <div>
+              <p class="eyebrow" id="detailEyebrow">Document</p>
+              <h2 id="detailName"></h2>
+              <p class="hist-meta" id="detailMeta"></p>
+            </div>
+            <div class="hist-download-row" id="detailDownloads"></div>
+          </div>
+          <!-- Tabs -->
+          <nav class="hist-tabs" id="histTabs">
+            <button class="hist-tab active" data-tab="final">Final Output</button>
+            <button class="hist-tab" data-tab="chunks">Chunks</button>
+            <button class="hist-tab" data-tab="logs">LLM Logs</button>
+            <button class="hist-tab" data-tab="jsons">JSONs</button>
+            <button class="hist-tab" data-tab="assets">Assets</button>
+          </nav>
+        </div>
+
+        <!-- Tab panels -->
+        <div class="hist-tab-panels">
+
+          <!-- Final Output -->
+          <div class="hist-tab-panel active" id="tab-final">
+            <div id="finalOutputContainer" class="hist-final-output">
+              <div class="hist-loading">Loading final document…</div>
+            </div>
+          </div>
+
+          <!-- Chunks -->
+          <div class="hist-tab-panel hidden" id="tab-chunks">
+            <div class="hist-chunks-toolbar">
+              <p class="hist-section-label">Extracted parts as classified — identical view to the human review step.</p>
+            </div>
+            <div id="chunksList" class="hist-chunks-list">
+              <div class="hist-loading">Loading chunks…</div>
+            </div>
+          </div>
+
+          <!-- LLM Logs -->
+          <div class="hist-tab-panel hidden" id="tab-logs">
+            <div class="hist-logs-toolbar">
+              <p class="hist-section-label">All LLM calls made during processing.</p>
+              <div class="hist-logs-filters">
+                <select id="logStageFilter">
+                  <option value="">All stages</option>
+                  <option value="classify">Classify</option>
+                  <option value="inspect">Inspect</option>
+                  <option value="extract">Extract</option>
+                </select>
+                <label class="hist-filter-check">
+                  <input type="checkbox" id="logFailedOnly"> Failed only
+                </label>
+              </div>
+            </div>
+            <div id="logsList" class="hist-logs-list">
+              <div class="hist-loading">Loading logs…</div>
+            </div>
+          </div>
+
+          <!-- JSONs -->
+          <div class="hist-tab-panel hidden" id="tab-jsons">
+            <div class="hist-jsons-list" id="jsonsList">
+              <div class="hist-loading">Loading JSON files…</div>
+            </div>
+          </div>
+
+          <!-- Assets -->
+          <div class="hist-tab-panel hidden" id="tab-assets">
+            <div id="assetsList" class="hist-assets-grid">
+              <div class="hist-loading">Loading assets…</div>
+            </div>
+          </div>
+
+        </div><!-- /tab-panels -->
+      </div><!-- /hist-detail -->
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='history_app.js') }}"></script>
+</body>
+</html>

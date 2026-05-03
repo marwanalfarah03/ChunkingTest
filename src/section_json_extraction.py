@@ -205,6 +205,7 @@ def request_section_json(
     system_prompt: str,
     user_prompt: str,
     max_llm_retries: int,
+    log_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any] | list[Any] | None, int, list[dict[str, str]]]:
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -215,6 +216,7 @@ def request_section_json(
 
     while True:
         attempt_count += 1
+        sent_messages = list(messages)
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -231,15 +233,40 @@ def request_section_json(
 
         try:
             parsed = parse_section_json_response(response_text, section_id)
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "extract",
+                    "subject": section_id,
+                    "model": model,
+                    "attempt": attempt_count,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": True,
+                    "error": None,
+                })
             return parsed, attempt_count, invalid_attempts
         except ValueError as exc:
+            error_str = str(exc)
             invalid_attempts.append(
                 {
                     "attempt": str(attempt_count),
-                    "error": str(exc),
+                    "error": error_str,
                     "response": response_text,
                 }
             )
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "extract",
+                    "subject": section_id,
+                    "model": model,
+                    "attempt": attempt_count,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": False,
+                    "error": error_str,
+                })
             if max_llm_retries > 0 and attempt_count >= max_llm_retries:
                 return None, attempt_count, invalid_attempts
             messages.extend(
@@ -268,6 +295,7 @@ def extract_document_sections(
     max_llm_retries: int = 6,
     quiet: bool = False,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    log_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     artifact_dir = find_chunk_artifact_dir(document_path)
     if artifact_dir is None:
@@ -406,6 +434,7 @@ def extract_document_sections(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_llm_retries=max_llm_retries,
+            log_callback=log_callback,
         )
 
         status = "resolved" if parsed_json is not None else "failed"

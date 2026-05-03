@@ -946,6 +946,7 @@ def request_inspection_resolution(
     cell_lookup: dict[str, dict[str, Any]],
     heuristic_resolution: dict[str, Any],
     max_llm_retries: int,
+    log_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any] | None, int, list[dict[str, str]]]:
     messages: list[dict[str, str]] = [
         {"role": "system", "content": INSPECTION_SYSTEM_PROMPT},
@@ -968,6 +969,7 @@ def request_inspection_resolution(
 
     while True:
         attempt_count += 1
+        sent_messages = list(messages)
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -988,15 +990,42 @@ def request_inspection_resolution(
                 cell_lookup=cell_lookup,
                 heuristic_resolution=heuristic_resolution,
             )
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "inspect",
+                    "subject": chunk_file_name,
+                    "section_id": section_id,
+                    "model": model,
+                    "attempt": attempt_count,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": True,
+                    "error": None,
+                })
             return parsed_payload, attempt_count, invalid_attempts
         except ValueError as exc:
+            error_str = str(exc)
             invalid_attempts.append(
                 {
                     "attempt": str(attempt_count),
-                    "error": str(exc),
+                    "error": error_str,
                     "response": response_text,
                 }
             )
+            if log_callback is not None:
+                log_callback({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "stage": "inspect",
+                    "subject": chunk_file_name,
+                    "section_id": section_id,
+                    "model": model,
+                    "attempt": attempt_count,
+                    "messages": sent_messages,
+                    "response": response_text,
+                    "success": False,
+                    "error": error_str,
+                })
             if max_llm_retries > 0 and attempt_count >= max_llm_retries:
                 return None, attempt_count, invalid_attempts
             messages.extend(
@@ -1055,6 +1084,7 @@ def inspect_classified_document(
     max_llm_retries: int = 6,
     quiet: bool = False,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    log_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     artifact_dir = find_chunk_artifact_dir(document_path)
     if artifact_dir is None:
@@ -1211,6 +1241,7 @@ def inspect_classified_document(
             cell_lookup=cell_lookup,
             heuristic_resolution=heuristic_resolution,
             max_llm_retries=max_llm_retries,
+            log_callback=log_callback,
         )
 
         resolved_by = "llm"

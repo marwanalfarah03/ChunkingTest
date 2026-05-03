@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import base64
 import json
 import io
 import os
@@ -55,6 +56,79 @@ _jobs_lock = threading.RLock()
 
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class LlmLogger:
+    """Thread-safe JSONL log writer for LLM calls."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._lock = threading.Lock()
+
+    def log(self, entry: dict[str, Any]) -> None:
+        with self._lock:
+            with self._path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def doc_dir_to_id(dir_name: str) -> str:
+    """Encode a document directory name to a URL-safe identifier."""
+    return base64.urlsafe_b64encode(dir_name.encode("utf-8")).decode().rstrip("=")
+
+
+def doc_id_to_dir_name(doc_id: str) -> str:
+    """Decode a URL-safe identifier back to a directory name."""
+    padding = (4 - len(doc_id) % 4) % 4
+    return base64.urlsafe_b64decode(doc_id + "=" * padding).decode("utf-8")
+
+
+def doc_id_to_path(doc_id: str) -> Path | None:
+    """Resolve a doc_id to its absolute Path, validating it stays under DOCUMENTS_ROOT."""
+    try:
+        dir_name = doc_id_to_dir_name(doc_id)
+    except Exception:
+        return None
+    candidate = (DOCUMENTS_ROOT / dir_name).resolve()
+    try:
+        candidate.relative_to(DOCUMENTS_ROOT.resolve())
+    except ValueError:
+        return None
+    if not candidate.is_dir():
+        return None
+    return candidate
+
+
+def list_history_documents() -> list[dict[str, Any]]:
+    """Return metadata for every document directory under DOCUMENTS_ROOT."""
+    if not DOCUMENTS_ROOT.exists():
+        return []
+    docs: list[dict[str, Any]] = []
+    for entry in sorted(DOCUMENTS_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not entry.is_dir():
+            continue
+        source_docx = entry / chunking.DEFAULT_SOURCE_DOCX_NAME
+        if not source_docx.exists():
+            continue
+        artifact_dir = entry / chunking.DEFAULT_OUTPUT_DIRNAME
+        chunk_count = 0
+        if artifact_dir.is_dir():
+            chunk_count = sum(
+                1 for p in artifact_dir.iterdir()
+                if p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
+            )
+        has_llm_logs = (entry / "llm_calls.jsonl").exists()
+        docs.append({
+            "id": doc_dir_to_id(entry.name),
+            "name": entry.name,
+            "created_at": datetime.fromtimestamp(source_docx.stat().st_mtime, tz=timezone.utc).isoformat(),
+            "has_classification": (entry / DEFAULT_CLASSIFICATION_OUTPUT_NAME).exists(),
+            "has_inspection": (entry / DEFAULT_INSPECTION_OUTPUT_NAME).exists(),
+            "has_section_json": (entry / DEFAULT_SECTION_JSON_OUTPUT_NAME).exists(),
+            "has_llm_logs": has_llm_logs,
+            "has_rag_txt": (entry / "rag_txt").is_dir(),
+            "chunk_count": chunk_count,
+        })
+    return docs
 
 
 def text_quality(value: str) -> int:
@@ -179,6 +253,7 @@ class DocumentRenderer:
         cell_map: dict[str, Any],
         asset_map: dict[str, Any],
         inspection_payload: dict[str, Any] | None = None,
+        asset_url_prefix: str | None = None,
     ) -> None:
         self.job_id = job_id
         self.document_path = document_path
@@ -187,6 +262,7 @@ class DocumentRenderer:
         self.cell_map = cell_map
         self.asset_map = asset_map
         self.inspection_payload = inspection_payload or {}
+        self.asset_url_prefix = asset_url_prefix or f"/api/assets/{escape(job_id)}"
 
     def render_inline_text(self, value: Any) -> str:
         fixed = INVISIBLE_CHARS_RE.sub("", repair_text(value))
@@ -307,7 +383,7 @@ class DocumentRenderer:
             return f'<span class="asset-missing">Embedded file {escape(asset_id)}</span>'
         label = repair_text(asset.get("original_name") or asset.get("stored_name") or asset_id)
         content_type = str(asset.get("content_type") or "")
-        url = f"/api/assets/{escape(self.job_id)}/{escape(asset_id)}"
+        url = f"{self.asset_url_prefix}/{escape(asset_id)}"
         if content_type.startswith("image/"):
             return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}">' f'<figcaption>{escape(label)}</figcaption></figure>'
         return f'<a class="embedded-file" href="{url}" target="_blank" rel="noopener"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
@@ -1228,7 +1304,7 @@ def build_review_items(job: UiJob, classification_payload: dict[str, Any]) -> li
     return items
 
 
-def run_classification_step(job: UiJob) -> dict[str, Any]:
+def run_classification_step(job: UiJob, llm_logger: LlmLogger | None = None) -> dict[str, Any]:
     if job.artifact_dir is None:
         raise PipelineError("Document artifacts are not ready yet.")
     targets = build_targets(job.display_name, job.artifact_dir)
@@ -1253,6 +1329,7 @@ def run_classification_step(job: UiJob) -> dict[str, Any]:
             model=job.config["model"],
             max_json_retries=int(job.config["max_classification_json_retries"]),
             previous_predictions=document_prediction_context,
+            log_callback=llm_logger.log if llm_logger else None,
         )
         invalid_json_retry_count += json_retry_count
         document_prediction_context.append((target.txt_file_name, predicted_sections))
@@ -1355,6 +1432,7 @@ def extraction_progress(job: UiJob, payload: dict[str, Any]) -> None:
 
 
 def run_pipeline(job: UiJob) -> None:
+    llm_logger = LlmLogger(job.document_path / "llm_calls.jsonl")
     try:
         job.set_status("running", "prepare", "Reading document", "Extracting document content")
         job.update_step("upload", "done", "Document received")
@@ -1367,7 +1445,7 @@ def run_pipeline(job: UiJob) -> None:
         job.update_step("prepare", "done", f"{chunk_count} parts extracted")
         job.set_progress(current=1, total=1, detail=f"{chunk_count} parts extracted")
 
-        classification_payload = run_classification_step(job)
+        classification_payload = run_classification_step(job, llm_logger=llm_logger)
         job.review_items = build_review_items(job, classification_payload)
         job.set_status("awaiting_review", "review", "Waiting for human review", "Confirm each extracted part to continue")
         job.update_step("review", "paused", f"0 of {len(job.review_items)} parts approved")
@@ -1395,6 +1473,7 @@ def run_pipeline(job: UiJob) -> None:
             max_llm_retries=int(job.config["max_inspection_retries"]),
             quiet=True,
             progress_callback=lambda payload: inspection_progress(job, payload),
+            log_callback=llm_logger.log,
         )
         job.inspection_payload = inspection_payload
         inspection_summary = inspection_payload.get("summary") or {}
@@ -1414,6 +1493,7 @@ def run_pipeline(job: UiJob) -> None:
             max_llm_retries=int(job.config["max_section_json_retries"]),
             quiet=True,
             progress_callback=lambda payload: extraction_progress(job, payload),
+            log_callback=llm_logger.log,
         )
         job.section_json_payload = section_json_payload
         section_summary = section_json_payload.get("summary") or {}
@@ -1658,6 +1738,294 @@ def api_asset(job_id: str, asset_id: str) -> Response:
     if not asset_path.exists():
         return jsonify({"error": "Asset not found."}), 404
     return send_file(asset_path)
+
+
+@app.post("/api/reset")
+def api_reset() -> Response:
+    global _active_job_id
+    with _jobs_lock:
+        active = _jobs.get(_active_job_id or "")
+        if active and active.status in {"queued", "running", "awaiting_review"}:
+            return jsonify({"error": "Cannot reset while a document is being processed."}), 409
+        _active_job_id = None
+    return jsonify({"ok": True})
+
+
+# ── History routes ────────────────────────────────────────────────────────────
+
+@app.get("/history")
+def history_page() -> str:
+    return render_template("history.html")
+
+
+@app.get("/api/history")
+def api_history_list() -> Response:
+    return jsonify(list_history_documents())
+
+
+@app.get("/api/history/<doc_id>")
+def api_history_detail(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    info: dict[str, Any] = {"id": doc_id, "name": doc_path.name}
+    for filename, key in [
+        (DEFAULT_CLASSIFICATION_OUTPUT_NAME, "classification"),
+        (DEFAULT_INSPECTION_OUTPUT_NAME, "inspection"),
+        (DEFAULT_SECTION_JSON_OUTPUT_NAME, "section_json"),
+    ]:
+        p = doc_path / filename
+        if p.exists():
+            try:
+                info[key] = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                info[key] = None
+        else:
+            info[key] = None
+    return jsonify(info)
+
+
+@app.get("/api/history/<doc_id>/chunks")
+def api_history_chunks(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+    if not artifact_dir.is_dir():
+        return jsonify([])
+
+    try:
+        table_map = load_json_file(artifact_dir / chunking.DEFAULT_TABLE_MAP_NAME)
+        cell_map = load_json_file(artifact_dir / chunking.DEFAULT_CELL_MAP_NAME)
+        asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+        asset_map = load_json_file(asset_map_path) if asset_map_path.exists() else {}
+    except FileNotFoundError:
+        return jsonify([])
+
+    renderer = DocumentRenderer(
+        job_id=doc_id,
+        document_path=doc_path,
+        artifact_dir=artifact_dir,
+        table_map=table_map,
+        cell_map=cell_map,
+        asset_map=asset_map,
+        asset_url_prefix=f"/api/history/{doc_id}/asset",
+    )
+
+    classification_payload: dict[str, Any] = {}
+    classification_path = doc_path / DEFAULT_CLASSIFICATION_OUTPUT_NAME
+    if classification_path.exists():
+        try:
+            classification_payload = json.loads(classification_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    results_by_name: dict[str, dict[str, Any]] = {}
+    for result in classification_payload.get("results") or []:
+        if isinstance(result, dict):
+            results_by_name[str(result.get("txt_file_name") or "")] = result
+
+    chunk_paths = sorted(
+        p for p in artifact_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
+    )
+    chunks = []
+    for chunk_path in chunk_paths:
+        result = results_by_name.get(chunk_path.name, {})
+        sections = [str(s) for s in result.get("predicted_sections") or []]
+        html = renderer.render_chunk(
+            chunk_path.name,
+            classification.project_relative_path(chunk_path),
+        )
+        chunks.append({
+            "name": chunk_path.name,
+            "sections": sections,
+            "section_labels": [section_display(s)["label"] for s in sections],
+            "review_action": result.get("review_action"),
+            "llm_predicted_sections": result.get("llm_predicted_sections"),
+            "html": html,
+        })
+    return jsonify(chunks)
+
+
+@app.get("/api/history/<doc_id>/llm-logs")
+def api_history_llm_logs(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+    log_path = doc_path / "llm_calls.jsonl"
+    if not log_path.exists():
+        return jsonify([])
+    entries: list[dict[str, Any]] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except Exception:
+            pass
+    return jsonify(entries)
+
+
+@app.get("/api/history/<doc_id>/final")
+def api_history_final(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
+    if not section_json_path.exists():
+        return jsonify({"error": "Final document JSON not found."}), 404
+
+    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+    if not artifact_dir.is_dir():
+        return jsonify({"error": "Chunk artifacts not found."}), 404
+
+    try:
+        section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
+        table_map = load_json_file(artifact_dir / chunking.DEFAULT_TABLE_MAP_NAME)
+        cell_map = load_json_file(artifact_dir / chunking.DEFAULT_CELL_MAP_NAME)
+        asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+        asset_map = load_json_file(asset_map_path) if asset_map_path.exists() else {}
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load artifacts: {exc}"}), 500
+
+    inspection_payload: dict[str, Any] = {}
+    inspection_path = doc_path / DEFAULT_INSPECTION_OUTPUT_NAME
+    if inspection_path.exists():
+        try:
+            inspection_payload = json.loads(inspection_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    renderer = DocumentRenderer(
+        job_id=doc_id,
+        document_path=doc_path,
+        artifact_dir=artifact_dir,
+        table_map=table_map,
+        cell_map=cell_map,
+        asset_map=asset_map,
+        inspection_payload=inspection_payload,
+        asset_url_prefix=f"/api/history/{doc_id}/asset",
+    )
+    html = renderer.render_final_document(section_json_payload, doc_path.name)
+    return jsonify({"html": html})
+
+
+@app.get("/api/history/<doc_id>/asset/<asset_id>")
+def api_history_asset(doc_id: str, asset_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Asset not found."}), 404
+    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+    asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+    if not asset_map_path.exists():
+        return jsonify({"error": "Asset not found."}), 404
+    asset_map = load_json_file(asset_map_path)
+    asset = asset_map.get(asset_id)
+    if not isinstance(asset, dict):
+        return jsonify({"error": "Asset not found."}), 404
+    relative_path = Path(str(asset.get("relative_path") or ""))
+    asset_path = (artifact_dir / relative_path).resolve()
+    try:
+        asset_path.relative_to(artifact_dir.resolve())
+    except ValueError:
+        return jsonify({"error": "Asset path is invalid."}), 400
+    if not asset_path.exists():
+        return jsonify({"error": "Asset not found."}), 404
+    return send_file(asset_path)
+
+
+@app.get("/api/history/<doc_id>/download/<which>")
+def api_history_download(doc_id: str, which: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    raw_name = re.sub(r"\s+", " ", doc_path.name).strip() or "document"
+
+    if which == "docx":
+        docx_path = doc_path / chunking.DEFAULT_SOURCE_DOCX_NAME
+        if not docx_path.exists():
+            return jsonify({"error": "Source DOCX not found."}), 404
+        filename = f"{raw_name}.docx"
+        ascii_filename = re.sub(r"[^\x20-\x7e]", "_", filename)
+        encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+        return send_file(
+            docx_path,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=ascii_filename,
+        )
+
+    json_files = {
+        "classification": (DEFAULT_CLASSIFICATION_OUTPUT_NAME, "classification"),
+        "inspection": (DEFAULT_INSPECTION_OUTPUT_NAME, "inspection"),
+        "section_json": (DEFAULT_SECTION_JSON_OUTPUT_NAME, "section_json"),
+    }
+    if which in json_files:
+        file_name, suffix = json_files[which]
+        json_path = doc_path / file_name
+        if not json_path.exists():
+            return jsonify({"error": "File not found."}), 404
+        filename = f"{raw_name}_{suffix}.json"
+        ascii_filename = re.sub(r"[^\x20-\x7e]", "_", filename)
+        encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+        content_disposition = (
+            f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        )
+        return Response(
+            json_path.read_bytes(),
+            mimetype="application/json",
+            headers={"Content-Disposition": content_disposition},
+        )
+
+    if which == "rag-txt":
+        section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
+        if not section_json_path.exists():
+            return jsonify({"error": "Final document JSON not found."}), 404
+        artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+        try:
+            section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
+            table_map, cell_map, asset_map = load_artifact_maps(artifact_dir) if artifact_dir.is_dir() else ({}, {}, {})
+        except Exception:
+            table_map, cell_map, asset_map = {}, {}, {}
+        manifest = rag_txt_export.export_rag_txt_files(
+            section_json_payload=section_json_payload,
+            output_dir=doc_path / "rag_txt",
+            table_map=table_map,
+            cell_map=cell_map,
+            asset_map=asset_map,
+        )
+        if int(manifest.get("chunk_count") or 0) == 0:
+            return jsonify({"error": "No resolved sections available for export."}), 404
+        output_dir = Path(str(manifest["output_dir"]))
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for chunk in manifest.get("chunks") or []:
+                file_path = Path(str(chunk.get("file_path") or ""))
+                if file_path.exists() and file_path.is_file():
+                    archive.write(file_path, arcname=file_path.name)
+            manifest_path = output_dir / "manifest.json"
+            if manifest_path.exists():
+                archive.write(manifest_path, arcname=manifest_path.name)
+        zip_buffer.seek(0)
+        filename = f"{raw_name}_rag_txt.zip"
+        ascii_filename = re.sub(r"[^\x20-\x7e]", "_", filename)
+        encoded_filename = _url_quote(filename, safe=" -._~()'!*")
+        content_disposition = (
+            f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        )
+        return Response(
+            zip_buffer.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": content_disposition},
+        )
+
+    return jsonify({"error": "Unknown download type."}), 400
 
 
 if __name__ == "__main__":
