@@ -42,7 +42,7 @@ Rules:
 - A full-width single-cell row still goes in "cells" as a one-element array.
 - Preserve all text exactly as it appears: HTML tags, color codes, bold markers, Arabic text.
 - Preserve all cell IDs (CL000XXX) exactly — they will be resolved later.
-- Do NOT include rows from other sections (SEC01 banner rows, SEC03 rows, etc.).
+- Do NOT include rows from other sections (SEC01 banner rows, SEC03 rows, etc.). SEC01 banner rows are identified by containing only asset/image markers such as `<TB000001>`, `<EM000001>`, or similar `<TB...>`/`<EM...>` tags with no SOP title or document number — these are the bank logo and header graphic and must be excluded entirely.
 - If additional free-form text appears in the input that belongs to this section but doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If SEC02 content is not found in the input, return {"section_id": "SEC02", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
