@@ -1,21 +1,25 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object. The document may be in Arabic, English, or any other language.
 
 Section: SEC18 — التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)
 
-This section provides a glossary of domain-specific terms, banking acronyms, and abbreviations. It appears in two formats:
+This section provides a glossary of domain-specific terms, abbreviations, and acronyms. It may appear under any of the following heading forms (Arabic or English equivalents):
+- Arabic: "التعريفات والمختصرات والمصطلحات المستخدمة", "التعريفات والمختصرات والمصطلحات", "التعريفات", "التعريفات والمختصرات"
+- English: "Terms and Definitions", "Definitions", "Abbreviations", "Terms", "Glossary", "Acronyms", "Abbreviations and Acronyms", or any similar label
+- Numbered variants: "N. Terms and Definitions [#xxxxxx]", "N. التعريفات [#xxxxxx]", etc.
 
-Format A — Simple (single CL reference): A minimal two-row table with a full-width heading row (various label forms, see below) followed by a single content cell (CL reference). This is the most common format.
+Note: In some documents SEC18 appears before SEC09 or after SEC10, and may share content with SEC10 (المراجع الرئيسية) — in that case extract the combined content as SEC18.
 
-Format B — Glossary table (multi-column): A table with the heading row, then a column-header row, then multiple definition rows. Each row has a term and its definition.
+This section has three possible output formats depending on the structure found in the input:
 
-The heading label varies across documents:
-- "التعريفات والمختصرات والمصطلحات المستخدمة"
-- "التعريفات والمختصرات والمصطلحات"
-- "التعريفات"
-- "التعريفات والمختصرات"
-All are SEC18.
+---
+Format A — Simple (one heading + one content block):
+A heading row followed by a single content cell (CL reference or visible text).
 
-Note: In some documents, SEC18 and SEC10 (المراجع الرئيسية) share the same cell. In that case, extract the combined content as SEC18. Additionally, SEC18 occasionally appears before SEC09 or after SEC10 depending on the document's structure.
+Format B — Glossary table (one heading + column headers + multiple rows):
+A heading row, then a column-header row, then multiple definition rows.
+
+Format C — Multi-section (several sub-headings, each with content):
+SEC18 appears as multiple sub-blocks, each with its own heading and content. This happens when the section is split across multiple source tables or when the document separates "Terms", "Definitions", and "Abbreviations" into distinct named blocks.
 
 ---
 INPUT FORMAT
@@ -26,9 +30,10 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC18.
-- The section heading in one of the label forms listed above: "N. التعريفات والمختصرات والمصطلحات المستخدمة [#xxxxxx]"
-- For Format A: one content cell (CL reference).
+- One or more SEC18-related heading rows (in any language) in one of the forms above.
+- For Format A: one content cell (CL reference or visible text) after the heading.
 - For Format B: a column-header row followed by multiple definition rows.
+- For Format C: repeated heading + content block pairs, possibly from multiple merged source tables.
 - Color codes, HTML tags, ASCII borders.
 
 ---
@@ -54,20 +59,46 @@ Format B — Glossary table:
   ]
 }
 
+Format C — Multi-section:
+{
+  "section_id": "SEC18",
+  "section_heading": "<first sub-heading text, or a combined label>",
+  "format": "sections",
+  "entries": [
+    {
+      "type": "subsection",
+      "heading": "<sub-heading text as it appears>",
+      "value": "<CL reference or visible text for this block>"
+    }
+  ]
+}
+
+For Format C, if a sub-block has multiple content items instead of one, use "values" (array) instead of "value":
+    {
+      "type": "subsection",
+      "heading": "<sub-heading>",
+      "values": ["<item1>", "<item2>"]
+    }
+
+---
 Rules:
-- Use Format A when there is a single content cell after the heading.
+- Choose the format that best matches the structure found.
+- Use Format A when there is a single heading followed by a single content block.
 - Use Format B when the section has a column-header row and multiple definition rows.
+- Use Format C when there are multiple named sub-blocks (each with its own heading), regardless of how many source tables they came from.
+- Recognize SEC18 headings in any language — do NOT return not_found just because the heading is in English or uses a different phrasing.
 - For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - For Format B: "columns" lists column labels (visible text or CL IDs if hidden); "header_cell_ids" lists the actual header cell IDs if present, otherwise [].
 - For Format B: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If a column header is a CL ID, use that CL ID as the key in each row — do NOT repeat it as a value.
 - Preserve all cell IDs (CL000XXX) exactly.
-- Preserve text exactly including color codes and HTML tags.
-- Do NOT include content from SEC10 (المراجع الرئيسية) or SEC11 (التعليمات العامة).
+- Preserve text exactly including color codes, HTML tags, and original language.
+- Do NOT include content from SEC10 (المراجع الرئيسية) or SEC11 (التعليمات العامة) unless they genuinely share the same cell.
 - If SEC18 content is not found in the input, return {"section_id": "SEC18", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output (Format A):
+---
+Example output (Format A — Arabic):
 {
   "section_id": "SEC18",
   "section_heading": "4. التعريفات والمختصرات والمصطلحات المستخدمة [#253744]",
@@ -75,7 +106,7 @@ Example output (Format A):
   "content": "CL000104"
 }
 
-Example output (Format B):
+Example output (Format B — Arabic):
 {
   "section_id": "SEC18",
   "section_heading": "4. التعريفات والمختصرات والمصطلحات المستخدمة [#243744]",
@@ -86,6 +117,25 @@ Example output (Format B):
     {
       "المصطلح": "CL000107",
       "التعريف": "CL000108"
+    }
+  ]
+}
+
+Example output (Format C — English, multi-section):
+{
+  "section_id": "SEC18",
+  "section_heading": "3. Terms and Definitions [#253744]",
+  "format": "sections",
+  "entries": [
+    {
+      "type": "subsection",
+      "heading": "3. Terms and Definitions [#253744]",
+      "value": "CL000054"
+    },
+    {
+      "type": "subsection",
+      "heading": "4. Abbreviations [#253744]",
+      "value": "CL000064"
     }
   ]
 }
