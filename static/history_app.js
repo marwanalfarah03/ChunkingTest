@@ -410,7 +410,11 @@ async function loadAssets() {
     const assetId = String(asset.id);
     const label = asset.name || assetId;
     const downloadName = asset.download_name || label;
+    const previewUrl = `/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}/preview`;
     const isImage = asset.kind === 'image' || String(asset.content_type || '').startsWith('image/');
+    const isSpreadsheet = Boolean(asset.is_spreadsheet)
+      || /\.xls[xmbt]?$/i.test(String(downloadName))
+      || String(asset.content_type || '').includes('spreadsheetml');
     const typeLabel = (() => {
       const ext = String(downloadName).split('.').pop();
       if (ext && ext !== downloadName) return ext.toUpperCase();
@@ -422,13 +426,23 @@ async function loadAssets() {
       ? `<img src="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}"
              alt="${escHtml(assetId)}"
              data-asset-preview>`
-      : `<div class="hist-asset-placeholder">${escHtml(typeLabel)}</div>`;
+      : isSpreadsheet
+        ? `<a class="hist-asset-preview-link" href="${previewUrl}" target="_blank" rel="noopener">
+             <div class="hist-asset-placeholder hist-asset-placeholder-action">
+               <strong>${escHtml(typeLabel)}</strong>
+               <span>Open preview</span>
+             </div>
+           </a>`
+        : `<div class="hist-asset-placeholder">${escHtml(typeLabel)}</div>`;
+    const nameHtml = isSpreadsheet
+      ? `<a class="hist-asset-name hist-asset-name-link" href="${previewUrl}" target="_blank" rel="noopener" title="${escHtml(label)}">${escHtml(label)}</a>`
+      : `<div class="hist-asset-name" title="${escHtml(label)}">${escHtml(label)}</div>`;
     return `
     <div class="hist-asset-card">
       <div class="hist-asset-preview">
         ${preview}
       </div>
-      <div class="hist-asset-name" title="${escHtml(label)}">${escHtml(label)}</div>
+      ${nameHtml}
       <a class="hist-asset-dl" href="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}" download="${escHtml(downloadName)}">&#8659;</a>
     </div>
   `;

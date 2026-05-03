@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ asset_label }} - Spreadsheet Preview</title>
+  <link rel="stylesheet" href="{{ static_asset_url('ui_styles.css') }}">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(0,147,201,.12), transparent 34%),
+        linear-gradient(180deg, #f7fafb 0%, #eef3f5 100%);
+      color: #243746;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+    .asset-preview-shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+      display: grid;
+      gap: 18px;
+    }
+    .asset-preview-header,
+    .asset-preview-panel,
+    .asset-preview-empty {
+      background: rgba(255,255,255,.92);
+      border: 1px solid rgba(36,55,70,.12);
+      border-radius: 24px;
+      box-shadow: 0 18px 50px rgba(36,55,70,.08);
+    }
+    .asset-preview-header {
+      padding: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .asset-preview-kicker {
+      margin: 0 0 8px;
+      color: #0093c9;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .asset-preview-header h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 38px);
+      line-height: 1.15;
+    }
+    .asset-preview-meta {
+      margin: 10px 0 0;
+      color: rgba(36,55,70,.62);
+      font-size: 14px;
+    }
+    .asset-preview-download {
+      align-self: center;
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: #0093c9;
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .asset-preview-panel {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .asset-preview-note {
+      margin: 0;
+      color: rgba(36,55,70,.66);
+      font-size: 14px;
+    }
+    .asset-preview-table-wrap {
+      overflow: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(36,55,70,.1);
+      background: white;
+    }
+    .sheet-preview-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .sheet-preview-table thead th {
+      position: sticky;
+      top: 0;
+      background: #eff6f8;
+      z-index: 1;
+    }
+    .sheet-preview-table th,
+    .sheet-preview-table td {
+      border: 1px solid rgba(36,55,70,.09);
+      padding: 10px 12px;
+      text-align: start;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    .sheet-preview-table tbody th {
+      background: #f8fbfc;
+      color: rgba(36,55,70,.68);
+      font-weight: 700;
+      position: sticky;
+      inset-inline-start: 0;
+    }
+    .sheet-preview-table td {
+      min-width: 112px;
+      max-width: 280px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .asset-preview-empty {
+      padding: 20px 24px;
+      color: rgba(36,55,70,.7);
+      line-height: 1.7;
+    }
+    @media (max-width: 720px) {
+      .asset-preview-shell {
+        padding: 18px 12px 30px;
+      }
+      .asset-preview-header {
+        padding: 18px;
+      }
+      .asset-preview-download {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="asset-preview-shell">
+    <section class="asset-preview-header">
+      <div>
+        <p class="asset-preview-kicker">Spreadsheet Preview</p>
+        <h1 dir="auto">{{ asset_label }}</h1>
+        <p class="asset-preview-meta" dir="auto">Download name: {{ download_name }}</p>
+      </div>
+      <a class="asset-preview-download" href="{{ download_url }}" download="{{ download_name }}">Download workbook</a>
+    </section>
+
+    {% if preview_error %}
+      <section class="asset-preview-empty">{{ preview_error }}</section>
+    {% elif preview and preview.rows %}
+      <section class="asset-preview-panel">
+        <p class="asset-preview-note" dir="auto">
+          Showing {{ preview.rows|length }} populated row{% if preview.rows|length != 1 %}s{% endif %}
+          from sheet {{ preview.sheet_name }}.
+          {% if preview.truncated_rows or preview.truncated_cols %}
+            The preview is limited to the first {{ preview.rows|length }} rows and {{ preview.column_labels|length }} columns.
+          {% endif %}
+        </p>
+        <div class="asset-preview-table-wrap">
+          <table class="sheet-preview-table">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                {% for label in preview.column_labels %}
+                  <th scope="col">{{ label }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in preview.rows %}
+                <tr>
+                  <th scope="row">{{ row.row_number }}</th>
+                  {% for cell in row.cells %}
+                    <td dir="auto">{{ cell }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% else %}
+      <section class="asset-preview-empty">
+        No visible values were found in the first worksheet. Download the workbook to inspect the full file.
+      </section>
+    {% endif %}
+  </main>
+</body>
+</html>

@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import traceback
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -47,6 +48,20 @@ RTL_CHAR_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 LTR_CHAR_RE = re.compile(r"[A-Za-z]")
 FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
 INVISIBLE_CHARS_RE = re.compile(r"[​‌‍‎‏‪-‮⁠﻿]")
+SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
+SPREADSHEET_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel.sheet.macroenabled.12",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+    "application/vnd.ms-excel.template.macroenabled.12",
+}
+XLSX_NS = {
+    "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "pkgrel": "http://schemas.openxmlformats.org/package/2006/relationships",
+}
+XLSX_REL_ID_ATTR = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+SPREADSHEET_PREVIEW_MAX_ROWS = 24
+SPREADSHEET_PREVIEW_MAX_COLS = 10
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
@@ -160,7 +175,7 @@ def history_entry_mtime(doc_path: Path) -> float:
     return max(existing) if existing else doc_path.stat().st_mtime
 
 
-def history_asset_list(artifact_dir: Path | None) -> list[dict[str, str]]:
+def history_asset_list(artifact_dir: Path | None) -> list[dict[str, Any]]:
     if artifact_dir is None:
         return []
     asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
@@ -180,6 +195,7 @@ def history_asset_list(artifact_dir: Path | None) -> list[dict[str, str]]:
             "name": asset_display_name(asset, str(asset_id)),
             "download_name": asset_download_name(asset, str(asset_id)),
             "content_type": str(asset.get("content_type") or ""),
+            "is_spreadsheet": asset_is_spreadsheet(asset),
         })
     return assets
 
@@ -323,6 +339,170 @@ def send_asset_response(artifact_dir: Path, asset: dict[str, Any], asset_id: str
     response = send_file(asset_path, **send_kwargs)
     response.headers["Content-Disposition"] = build_download_content_disposition(download_name)
     return response
+
+
+def asset_is_spreadsheet(asset: dict[str, Any]) -> bool:
+    content_type = str(asset.get("content_type") or "").lower()
+    if content_type in SPREADSHEET_CONTENT_TYPES:
+        return True
+    for key in ("original_name", "stored_name", "relative_path"):
+        suffix = Path(str(asset.get(key) or "")).suffix.lower()
+        if suffix in SPREADSHEET_EXTENSIONS:
+            return True
+    return False
+
+
+def spreadsheet_column_number(reference: str) -> int:
+    letters = "".join(character for character in reference if character.isalpha()).upper()
+    value = 0
+    for character in letters:
+        value = value * 26 + (ord(character) - 64)
+    return value
+
+
+def spreadsheet_column_label(index: int) -> str:
+    label = ""
+    current = index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        label = chr(65 + remainder) + label
+    return label or "A"
+
+
+def spreadsheet_text_content(element: ET.Element | None) -> str:
+    if element is None:
+        return ""
+    return "".join(part for part in element.itertext() if part)
+
+
+def normalize_spreadsheet_value(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def spreadsheet_cell_value(cell: ET.Element, shared_strings: list[str]) -> str:
+    cell_type = cell.get("t") or ""
+    if cell_type == "inlineStr":
+        return normalize_spreadsheet_value(spreadsheet_text_content(cell.find("./main:is", XLSX_NS)))
+
+    value_text = normalize_spreadsheet_value(spreadsheet_text_content(cell.find("./main:v", XLSX_NS)))
+    if cell_type == "s" and value_text:
+        try:
+            return shared_strings[int(value_text)]
+        except (IndexError, ValueError):
+            return value_text
+    if cell_type == "b":
+        return "TRUE" if value_text == "1" else "FALSE"
+    if value_text:
+        return value_text
+
+    formula_text = normalize_spreadsheet_value(spreadsheet_text_content(cell.find("./main:f", XLSX_NS)))
+    return f"={formula_text}" if formula_text else ""
+
+
+def load_xlsx_preview(asset_path: Path, max_rows: int = SPREADSHEET_PREVIEW_MAX_ROWS, max_cols: int = SPREADSHEET_PREVIEW_MAX_COLS) -> dict[str, Any]:
+    with zipfile.ZipFile(asset_path) as archive:
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        workbook_rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            shared_root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            for item in shared_root.findall("./main:si", XLSX_NS):
+                shared_strings.append(normalize_spreadsheet_value(spreadsheet_text_content(item)))
+
+        sheet = workbook.find("./main:sheets/main:sheet", XLSX_NS)
+        if sheet is None:
+            raise ValueError("Workbook does not contain any sheets.")
+
+        relationship_id = sheet.get(XLSX_REL_ID_ATTR) or ""
+        relationship_map = {
+            rel.attrib.get("Id", ""): chunking.resolve_relationship_target("xl/workbook.xml", rel.attrib.get("Target", ""))
+            for rel in workbook_rels.findall("./pkgrel:Relationship", XLSX_NS)
+        }
+        sheet_member = relationship_map.get(relationship_id)
+        if not sheet_member:
+            raise ValueError("Workbook relationship for the first sheet is missing.")
+
+        sheet_root = ET.fromstring(archive.read(sheet_member))
+        cells_by_row: dict[int, dict[int, str]] = {}
+        min_column: int | None = None
+        max_column = 0
+        for row in sheet_root.findall("./main:sheetData/main:row", XLSX_NS):
+            row_number = int(row.get("r") or 0)
+            if row_number <= 0:
+                continue
+            row_values = cells_by_row.setdefault(row_number, {})
+            for cell in row.findall("./main:c", XLSX_NS):
+                reference = cell.get("r") or ""
+                column_number = spreadsheet_column_number(reference)
+                if column_number <= 0:
+                    continue
+                value = spreadsheet_cell_value(cell, shared_strings)
+                if not value:
+                    continue
+                row_values[column_number] = value
+                if min_column is None or column_number < min_column:
+                    min_column = column_number
+                if column_number > max_column:
+                    max_column = column_number
+
+        populated_rows = [row_number for row_number, row_values in sorted(cells_by_row.items()) if row_values]
+        if not populated_rows or min_column is None:
+            return {
+                "sheet_name": repair_text(sheet.get("name") or "Sheet1"),
+                "column_labels": [],
+                "rows": [],
+                "truncated_rows": False,
+                "truncated_cols": False,
+            }
+
+        displayed_rows = populated_rows[:max_rows]
+        end_column = min(max_column, min_column + max_cols - 1)
+        displayed_columns = list(range(min_column, end_column + 1))
+        return {
+            "sheet_name": repair_text(sheet.get("name") or "Sheet1"),
+            "column_labels": [spreadsheet_column_label(column_number) for column_number in displayed_columns],
+            "rows": [
+                {
+                    "row_number": row_number,
+                    "cells": [cells_by_row[row_number].get(column_number, "") for column_number in displayed_columns],
+                }
+                for row_number in displayed_rows
+            ],
+            "truncated_rows": len(populated_rows) > len(displayed_rows),
+            "truncated_cols": max_column > end_column,
+        }
+
+
+def send_spreadsheet_preview_response(
+    artifact_dir: Path,
+    asset: dict[str, Any],
+    asset_id: str,
+    *,
+    download_url: str,
+) -> Response:
+    asset_path = resolve_asset_file_path(artifact_dir, asset)
+    if not asset_path.exists():
+        raise FileNotFoundError(asset_path)
+
+    preview: dict[str, Any] | None = None
+    preview_error: str | None = None
+    try:
+        preview = load_xlsx_preview(asset_path)
+    except (KeyError, ValueError, zipfile.BadZipFile, ET.ParseError):
+        preview_error = "Preview is unavailable for this spreadsheet. Download it to open the full workbook locally."
+
+    return Response(
+        render_template(
+            "asset_preview.html",
+            asset_label=asset_display_name(asset, asset_id),
+            asset_id=asset_id,
+            download_name=asset_download_name(asset, asset_id),
+            download_url=download_url,
+            preview=preview,
+            preview_error=preview_error,
+        ),
+        mimetype="text/html",
+    )
 
 
 def dominant_direction(value: Any) -> str:
@@ -556,6 +736,8 @@ class DocumentRenderer:
         url = f"{self.asset_url_prefix}/{escape(asset_id)}"
         if content_type.startswith("image/"):
             return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}">' f'<figcaption>{escape(label)}</figcaption></figure>'
+        if asset_is_spreadsheet(asset):
+            return f'<a class="embedded-file" href="{url}/preview" target="_blank" rel="noopener"><span>Spreadsheet preview</span><strong>{escape(label)}</strong></a>'
         return f'<a class="embedded-file" href="{url}" download="{escape(download_name)}"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
 
     def cells_for_table(self, table_id: str) -> list[dict[str, Any]]:
@@ -1952,6 +2134,33 @@ def api_download_rag_txt() -> Response:
     )
 
 
+@app.get("/api/assets/<job_id>/<asset_id>/preview")
+def api_asset_preview(job_id: str, asset_id: str) -> Response:
+    job = _jobs.get(job_id)
+    if job is None or job.artifact_dir is None:
+        return jsonify({"error": "Asset not found."}), 404
+    asset_map_path = job.artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+    if not asset_map_path.exists():
+        return jsonify({"error": "Asset not found."}), 404
+    asset_map = load_json_file(asset_map_path)
+    asset = asset_map.get(asset_id)
+    if not isinstance(asset, dict):
+        return jsonify({"error": "Asset not found."}), 404
+    if not asset_is_spreadsheet(asset):
+        return jsonify({"error": "Preview unavailable for this asset."}), 404
+    try:
+        return send_spreadsheet_preview_response(
+            job.artifact_dir,
+            asset,
+            asset_id,
+            download_url=url_for("api_asset", job_id=job_id, asset_id=asset_id),
+        )
+    except ValueError:
+        return jsonify({"error": "Asset path is invalid."}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "Asset not found."}), 404
+
+
 @app.get("/api/assets/<job_id>/<asset_id>")
 def api_asset(job_id: str, asset_id: str) -> Response:
     job = _jobs.get(job_id)
@@ -2201,6 +2410,36 @@ def api_history_final(doc_id: str) -> Response:
     )
     html = renderer.render_final_document(section_json_payload, doc_path.name)
     return jsonify({"html": html})
+
+
+@app.get("/api/history/<doc_id>/asset/<asset_id>/preview")
+def api_history_asset_preview(doc_id: str, asset_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Asset not found."}), 404
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is None:
+        return jsonify({"error": "Asset not found."}), 404
+    asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+    if not asset_map_path.exists():
+        return jsonify({"error": "Asset not found."}), 404
+    asset_map = load_json_file(asset_map_path)
+    asset = asset_map.get(asset_id)
+    if not isinstance(asset, dict):
+        return jsonify({"error": "Asset not found."}), 404
+    if not asset_is_spreadsheet(asset):
+        return jsonify({"error": "Preview unavailable for this asset."}), 404
+    try:
+        return send_spreadsheet_preview_response(
+            artifact_dir,
+            asset,
+            asset_id,
+            download_url=url_for("api_history_asset", doc_id=doc_id, asset_id=asset_id),
+        )
+    except ValueError:
+        return jsonify({"error": "Asset path is invalid."}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "Asset not found."}), 404
 
 
 @app.get("/api/history/<doc_id>/asset/<asset_id>")
