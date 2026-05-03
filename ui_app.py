@@ -1781,6 +1781,21 @@ def run_classification_step(job: UiJob, llm_logger: LlmLogger | None = None) -> 
     document_prediction_context: list[tuple[str, list[str]]] = []
     for index, target in enumerate(targets, start=1):
         job.set_progress(current=index - 1, total=len(targets), detail=f"Reading part {index} of {len(targets)}")
+        if not target.raw_text.strip():
+            results.append({
+                "document_name": target.document_name,
+                "txt_file_name": target.txt_file_name,
+                "relative_path": target.relative_path,
+                "predicted_sections": [],
+                "json_retry_count": 0,
+                "invalid_attempts": [],
+                "preview": "",
+                "skipped": "empty",
+            })
+            job.update_step("classify", "running", f"{index} of {len(targets)} parts complete")
+            job.set_progress(current=index, total=len(targets), detail=f"Part {index} skipped (empty)")
+            continue
+
         predicted_sections, json_retry_count, invalid_attempts = classification.request_prediction(
             client=client,
             system_prompt=system_prompt,
@@ -2576,6 +2591,59 @@ def api_history_download(doc_id: str, which: str) -> Response:
         )
 
     return jsonify({"error": "Unknown download type."}), 400
+
+
+@app.post("/api/history/download-rag-txts")
+def api_history_download_rag_txts() -> Response:
+    body = request.get_json(force=True, silent=True) or {}
+    doc_ids = body.get("doc_ids")
+    if not isinstance(doc_ids, list) or not doc_ids:
+        return jsonify({"error": "doc_ids must be a non-empty list."}), 400
+
+    zip_buffer = io.BytesIO()
+    included = 0
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for doc_id in doc_ids:
+            if not isinstance(doc_id, str):
+                continue
+            doc_path = doc_id_to_path(doc_id)
+            if doc_path is None:
+                continue
+            section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
+            if not section_json_path.exists():
+                continue
+            artifact_dir = history_artifact_dir(doc_path)
+            try:
+                section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
+                table_map, cell_map, asset_map = load_artifact_maps(artifact_dir) if artifact_dir is not None else ({}, {}, {})
+            except Exception:
+                table_map, cell_map, asset_map = {}, {}, {}
+            manifest = rag_txt_export.export_rag_txt_files(
+                section_json_payload=section_json_payload,
+                output_dir=doc_path / "rag_txt",
+                table_map=table_map,
+                cell_map=cell_map,
+                asset_map=asset_map,
+            )
+            folder = re.sub(r'[\\/:*?"<>|]+', "_", doc_path.name).strip() or f"doc_{doc_id[:8]}"
+            for chunk in manifest.get("chunks") or []:
+                file_path = Path(str(chunk.get("file_path") or ""))
+                if file_path.exists() and file_path.is_file():
+                    archive.write(file_path, arcname=f"{folder}/{file_path.name}")
+            manifest_path = doc_path / "rag_txt" / "manifest.json"
+            if manifest_path.exists():
+                archive.write(manifest_path, arcname=f"{folder}/manifest.json")
+            included += 1
+
+    if included == 0:
+        return jsonify({"error": "None of the selected documents have a final output available."}), 404
+
+    zip_buffer.seek(0)
+    return Response(
+        zip_buffer.getvalue(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="rag_txts.zip"'},
+    )
 
 
 if __name__ == "__main__":

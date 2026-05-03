@@ -470,5 +470,105 @@ async function loadAssets() {
   });
 }
 
+// ── RAG TXT bulk download modal ────────────────────────────────────────────
+const ragModal        = el('ragModal');
+const ragDocList      = el('ragDocList');
+const ragSelectionCount = el('ragSelectionCount');
+const ragDownloadBtn  = el('ragDownloadBtn');
+
+function getRagEligibleDocs() {
+  return state.docs.filter((d) => d.has_section_json);
+}
+
+function getRagSelectedIds() {
+  return [...ragDocList.querySelectorAll('input[type="checkbox"]:checked')].map((cb) => cb.value);
+}
+
+function updateRagCount() {
+  const total = ragDocList.querySelectorAll('input[type="checkbox"]').length;
+  const selected = getRagSelectedIds().length;
+  ragSelectionCount.textContent = `${selected} of ${total} selected`;
+  ragDownloadBtn.disabled = selected === 0;
+}
+
+function openRagModal() {
+  const eligible = getRagEligibleDocs();
+
+  if (!eligible.length) {
+    ragDocList.innerHTML = '<div class="hist-empty">No documents with a final output are available.</div>';
+  } else {
+    ragDocList.innerHTML = eligible.map((doc) => `
+      <label class="rag-doc-item">
+        <input type="checkbox" value="${escHtml(doc.id)}" checked>
+        <span class="rag-doc-item-name" ${dirAttr(doc.name)}>${escHtml(doc.name)}</span>
+        <span class="rag-doc-item-date">${escHtml(formatDate(doc.created_at))}</span>
+      </label>`).join('');
+  }
+
+  updateRagCount();
+  ragModal.classList.remove('hidden');
+  ragModal.focus();
+}
+
+function closeRagModal() {
+  ragModal.classList.add('hidden');
+}
+
+el('openRagModalBtn').addEventListener('click', openRagModal);
+el('ragModalClose').addEventListener('click', closeRagModal);
+el('ragModalCancel').addEventListener('click', closeRagModal);
+ragModal.addEventListener('click', (e) => { if (e.target === ragModal) closeRagModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ragModal.classList.contains('hidden')) closeRagModal(); });
+
+el('ragSelectAll').addEventListener('click', () => {
+  ragDocList.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
+  updateRagCount();
+});
+el('ragClearAll').addEventListener('click', () => {
+  ragDocList.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+  updateRagCount();
+});
+ragDocList.addEventListener('change', updateRagCount);
+
+ragDownloadBtn.addEventListener('click', async () => {
+  const ids = getRagSelectedIds();
+  if (!ids.length) return;
+
+  const originalText = ragDownloadBtn.textContent;
+  ragDownloadBtn.disabled = true;
+  ragDownloadBtn.textContent = 'Building ZIP…';
+
+  try {
+    const res = await fetch('/api/history/download-rag-txts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_ids: ids }),
+    });
+
+    if (!res.ok) {
+      let message = `Download failed (${res.status})`;
+      try { const payload = await res.json(); if (payload?.error) message = payload.error; } catch (_) {}
+      throw new Error(message);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rag_txts.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    closeRagModal();
+  } catch (err) {
+    window.alert(err.message || 'Download failed.');
+  } finally {
+    ragDownloadBtn.disabled = false;
+    ragDownloadBtn.textContent = originalText;
+    updateRagCount();
+  }
+});
+
 // ── Init ───────────────────────────────────────────────────────────────────
 loadDocList();

@@ -26,6 +26,9 @@
         <p class="eyebrow">Processed documents</p>
         <span id="docCount" class="hist-doc-count">0 documents</span>
       </div>
+      <div class="hist-sidebar-actions">
+        <button type="button" class="hist-rag-btn" id="openRagModalBtn">&#8659; Download RAG TXTs</button>
+      </div>
       <div id="docList" class="hist-doc-list">
         <div class="hist-empty">Loading…</div>
       </div>
@@ -121,6 +124,27 @@
         </div><!-- /tab-panels -->
       </div><!-- /hist-detail -->
     </main>
+  </div>
+
+  <!-- RAG TXT bulk download modal -->
+  <div id="ragModal" class="rag-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ragModalTitle">
+    <div class="rag-modal">
+      <div class="rag-modal-header">
+        <h3 id="ragModalTitle">Download RAG TXTs</h3>
+        <button type="button" class="rag-modal-close" id="ragModalClose" aria-label="Close">&#x2715;</button>
+      </div>
+      <p class="rag-modal-desc">Select documents to bundle into a single ZIP. Only documents with a final output are listed.</p>
+      <div class="rag-modal-toolbar">
+        <button type="button" class="rag-toolbar-btn" id="ragSelectAll">Select all</button>
+        <button type="button" class="rag-toolbar-btn" id="ragClearAll">Clear all</button>
+        <span id="ragSelectionCount" class="rag-selection-count"></span>
+      </div>
+      <div id="ragDocList" class="rag-doc-list"></div>
+      <div class="rag-modal-footer">
+        <button type="button" class="secondary-button" id="ragModalCancel">Cancel</button>
+        <button type="button" class="primary-button" id="ragDownloadBtn">&#8659; Download ZIP</button>
+      </div>
+    </div>
   </div>
 
   <script src="{{ static_asset_url('history_app.js') }}"></script>

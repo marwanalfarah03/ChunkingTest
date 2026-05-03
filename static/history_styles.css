@@ -486,6 +486,163 @@ body.history-page .final-doc-header p {
 }
 .hist-asset-dl:hover { background: rgba(0,147,201,.07); }
 
+/* ── RAG TXT bulk download ──────────────────────────────────────────────── */
+.hist-sidebar-actions {
+  padding: 0 16px 12px;
+  flex-shrink: 0;
+}
+
+.hist-rag-btn {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.14);
+  color: rgba(255,255,255,.88);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+  text-align: center;
+  transition: background .15s, border-color .15s;
+}
+.hist-rag-btn:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.24); }
+
+.rag-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24,38,50,.52);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.rag-modal {
+  background: white;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 28px 72px rgba(24,38,50,.28);
+  width: 100%;
+  max-width: 540px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rag-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.rag-modal-header h3 { margin: 0; font-size: 20px; color: var(--cbo-blue); }
+
+.rag-modal-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: rgba(24,38,50,.45);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  line-height: 1;
+  transition: background .15s, color .15s;
+}
+.rag-modal-close:hover { background: rgba(24,38,50,.07); color: var(--cbo-blue); }
+
+.rag-modal-desc {
+  margin: 0;
+  padding: 14px 24px 0;
+  font-size: 13px;
+  color: rgba(24,38,50,.6);
+  line-height: 1.55;
+  flex-shrink: 0;
+}
+
+.rag-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.rag-toolbar-btn {
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: white;
+  font-size: 12px;
+  font-weight: 850;
+  color: var(--cbo-ink);
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.rag-toolbar-btn:hover { background: rgba(0,147,201,.07); border-color: rgba(0,147,201,.3); color: var(--cbo-blue); }
+
+.rag-selection-count {
+  margin-inline-start: auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(24,38,50,.52);
+}
+
+.rag-doc-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 16px;
+  display: grid;
+  gap: 2px;
+}
+
+.rag-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.rag-doc-item:hover { background: rgba(0,147,201,.06); border-color: rgba(0,147,201,.15); }
+.rag-doc-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cbo-sky);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.rag-doc-item-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--cbo-blue);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-doc-item-date {
+  font-size: 12px;
+  color: rgba(24,38,50,.48);
+  flex-shrink: 0;
+}
+
+.rag-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
 /* ── Builder page additions ─────────────────────────────────────────────── */
 .history-nav-btn {
   margin-inline-start: auto;

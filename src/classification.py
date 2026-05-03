@@ -459,6 +459,27 @@ def main() -> int:
     document_prediction_context: list[tuple[str, list[str]]] = []
 
     for index, target in enumerate(targets, start=1):
+        if not target.raw_text.strip():
+            results.append(
+                {
+                    "document_name": target.document_name,
+                    "txt_file_name": target.txt_file_name,
+                    "relative_path": target.relative_path,
+                    "predicted_sections": [],
+                    "json_retry_count": 0,
+                    "invalid_attempts": [],
+                    "preview": "",
+                    "skipped": "empty",
+                }
+            )
+            if not args.quiet:
+                print(
+                    f"[{index}/{len(targets)}] {target.txt_file_name} | skipped (empty chunk)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            continue
+
         predicted_sections, json_retry_count, invalid_attempts = request_prediction(
             client=client,
             system_prompt=system_prompt,
