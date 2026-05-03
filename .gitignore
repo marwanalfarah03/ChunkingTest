@@ -4,7 +4,6 @@ docx/
 documents/
 section_memory_drafts/
 testing/
-CBOJ_Color_Palette 1.pdf
 CLAUDE.md
 fastapi_app.py
 main.py

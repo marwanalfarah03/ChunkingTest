@@ -98,20 +98,95 @@ def doc_id_to_path(doc_id: str) -> Path | None:
     return candidate
 
 
+def history_artifact_dir(doc_path: Path) -> Path | None:
+    """Return the chunk artifact directory for current and legacy history entries."""
+    candidates = [doc_path / chunking.DEFAULT_OUTPUT_DIRNAME, doc_path]
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        has_maps = (
+            (candidate / chunking.DEFAULT_TABLE_MAP_NAME).exists()
+            or (candidate / chunking.DEFAULT_CELL_MAP_NAME).exists()
+            or (candidate / chunking.DEFAULT_ASSET_MAP_NAME).exists()
+        )
+        has_chunks = any(
+            p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
+            for p in candidate.iterdir()
+        )
+        if has_maps or has_chunks:
+            return candidate
+    return None
+
+
+def history_source_docx(doc_path: Path) -> Path | None:
+    preferred = doc_path / chunking.DEFAULT_SOURCE_DOCX_NAME
+    if preferred.exists():
+        return preferred
+    docx_files = sorted(doc_path.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return docx_files[0] if docx_files else None
+
+
+def history_entry_mtime(doc_path: Path) -> float:
+    paths = [
+        history_source_docx(doc_path),
+        doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME,
+        doc_path / DEFAULT_CLASSIFICATION_OUTPUT_NAME,
+        doc_path / "llm_calls.jsonl",
+    ]
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is not None:
+        paths.append(artifact_dir)
+    existing = [p.stat().st_mtime for p in paths if p is not None and p.exists()]
+    return max(existing) if existing else doc_path.stat().st_mtime
+
+
+def history_asset_list(artifact_dir: Path | None) -> list[dict[str, str]]:
+    if artifact_dir is None:
+        return []
+    asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+    if not asset_map_path.exists():
+        return []
+    try:
+        asset_map = load_json_file(asset_map_path)
+    except Exception:
+        return []
+    assets: list[dict[str, str]] = []
+    for asset_id, asset in sorted(asset_map.items()):
+        if not isinstance(asset, dict):
+            continue
+        assets.append({
+            "id": str(asset_id),
+            "kind": str(asset.get("kind") or ""),
+            "name": repair_text(asset.get("original_name") or asset.get("stored_name") or asset_id),
+            "content_type": str(asset.get("content_type") or ""),
+        })
+    return assets
+
+
 def list_history_documents() -> list[dict[str, Any]]:
     """Return metadata for every document directory under DOCUMENTS_ROOT."""
     if not DOCUMENTS_ROOT.exists():
         return []
     docs: list[dict[str, Any]] = []
-    for entry in sorted(DOCUMENTS_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    entries = [p for p in DOCUMENTS_ROOT.iterdir() if p.is_dir()]
+    for entry in sorted(entries, key=history_entry_mtime, reverse=True):
         if not entry.is_dir():
             continue
-        source_docx = entry / chunking.DEFAULT_SOURCE_DOCX_NAME
-        if not source_docx.exists():
+        source_docx = history_source_docx(entry)
+        artifact_dir = history_artifact_dir(entry)
+        has_history_artifacts = any(
+            (entry / filename).exists()
+            for filename in [
+                DEFAULT_CLASSIFICATION_OUTPUT_NAME,
+                DEFAULT_INSPECTION_OUTPUT_NAME,
+                DEFAULT_SECTION_JSON_OUTPUT_NAME,
+                "llm_calls.jsonl",
+            ]
+        )
+        if source_docx is None and artifact_dir is None and not has_history_artifacts:
             continue
-        artifact_dir = entry / chunking.DEFAULT_OUTPUT_DIRNAME
         chunk_count = 0
-        if artifact_dir.is_dir():
+        if artifact_dir is not None:
             chunk_count = sum(
                 1 for p in artifact_dir.iterdir()
                 if p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
@@ -120,12 +195,14 @@ def list_history_documents() -> list[dict[str, Any]]:
         docs.append({
             "id": doc_dir_to_id(entry.name),
             "name": entry.name,
-            "created_at": datetime.fromtimestamp(source_docx.stat().st_mtime, tz=timezone.utc).isoformat(),
+            "created_at": datetime.fromtimestamp(history_entry_mtime(entry), tz=timezone.utc).isoformat(),
+            "has_docx": source_docx is not None,
             "has_classification": (entry / DEFAULT_CLASSIFICATION_OUTPUT_NAME).exists(),
             "has_inspection": (entry / DEFAULT_INSPECTION_OUTPUT_NAME).exists(),
             "has_section_json": (entry / DEFAULT_SECTION_JSON_OUTPUT_NAME).exists(),
             "has_llm_logs": has_llm_logs,
             "has_rag_txt": (entry / "rag_txt").is_dir(),
+            "has_assets": bool(history_asset_list(artifact_dir)),
             "chunk_count": chunk_count,
         })
     return docs
@@ -1834,7 +1911,22 @@ def api_history_detail(doc_id: str) -> Response:
     if doc_path is None:
         return jsonify({"error": "Document not found."}), 404
 
-    info: dict[str, Any] = {"id": doc_id, "name": doc_path.name}
+    artifact_dir = history_artifact_dir(doc_path)
+    source_docx = history_source_docx(doc_path)
+    chunk_count = 0
+    if artifact_dir is not None:
+        chunk_count = sum(
+            1 for p in artifact_dir.iterdir()
+            if p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
+        )
+    info: dict[str, Any] = {
+        "id": doc_id,
+        "name": doc_path.name,
+        "created_at": datetime.fromtimestamp(history_entry_mtime(doc_path), tz=timezone.utc).isoformat(),
+        "has_docx": source_docx is not None,
+        "chunk_count": chunk_count,
+        "assets": history_asset_list(artifact_dir),
+    }
     for filename, key in [
         (DEFAULT_CLASSIFICATION_OUTPUT_NAME, "classification"),
         (DEFAULT_INSPECTION_OUTPUT_NAME, "inspection"),
@@ -1857,8 +1949,8 @@ def api_history_chunks(doc_id: str) -> Response:
     if doc_path is None:
         return jsonify({"error": "Document not found."}), 404
 
-    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
-    if not artifact_dir.is_dir():
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is None:
         return jsonify([])
 
     try:
@@ -1945,8 +2037,8 @@ def api_history_final(doc_id: str) -> Response:
     if not section_json_path.exists():
         return jsonify({"error": "Final document JSON not found."}), 404
 
-    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
-    if not artifact_dir.is_dir():
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is None:
         return jsonify({"error": "Chunk artifacts not found."}), 404
 
     try:
@@ -1985,7 +2077,9 @@ def api_history_asset(doc_id: str, asset_id: str) -> Response:
     doc_path = doc_id_to_path(doc_id)
     if doc_path is None:
         return jsonify({"error": "Asset not found."}), 404
-    artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is None:
+        return jsonify({"error": "Asset not found."}), 404
     asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
     if not asset_map_path.exists():
         return jsonify({"error": "Asset not found."}), 404
@@ -2013,8 +2107,8 @@ def api_history_download(doc_id: str, which: str) -> Response:
     raw_name = re.sub(r"\s+", " ", doc_path.name).strip() or "document"
 
     if which == "docx":
-        docx_path = doc_path / chunking.DEFAULT_SOURCE_DOCX_NAME
-        if not docx_path.exists():
+        docx_path = history_source_docx(doc_path)
+        if docx_path is None or not docx_path.exists():
             return jsonify({"error": "Source DOCX not found."}), 404
         filename = f"{raw_name}.docx"
         ascii_filename = re.sub(r"[^\x20-\x7e]", "_", filename)
@@ -2052,10 +2146,10 @@ def api_history_download(doc_id: str, which: str) -> Response:
         section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
         if not section_json_path.exists():
             return jsonify({"error": "Final document JSON not found."}), 404
-        artifact_dir = doc_path / chunking.DEFAULT_OUTPUT_DIRNAME
+        artifact_dir = history_artifact_dir(doc_path)
         try:
             section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
-            table_map, cell_map, asset_map = load_artifact_maps(artifact_dir) if artifact_dir.is_dir() else ({}, {}, {})
+            table_map, cell_map, asset_map = load_artifact_maps(artifact_dir) if artifact_dir is not None else ({}, {}, {})
         except Exception:
             table_map, cell_map, asset_map = {}, {}, {}
         manifest = rag_txt_export.export_rag_txt_files(

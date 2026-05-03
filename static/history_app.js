@@ -3,7 +3,7 @@ function escHtml(v) {
   return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 }
 function el(id) { return document.getElementById(id); }
-function show(elem, visible) { elem.classList.toggle('hidden', !visible); }
+function show(elem, visible) { if (elem) elem.classList.toggle('hidden', !visible); }
 function textDir(v) {
   const t = String(v ?? '');
   const rtl = (t.match(/[֐-ࣿיִ-﷽ﹰ-ﻼ]/g)||[]).length;
@@ -12,6 +12,19 @@ function textDir(v) {
   return rtl >= Math.max(2, Math.floor(ltr * 0.45)) ? 'rtl' : 'ltr';
 }
 function dirAttr(v) { const d = textDir(v); return `dir="${d}" class="text-${d}"`; }
+function formatDate(value, mode = 'date') {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  if (mode === 'time') return date.toLocaleTimeString('en-GB');
+  if (mode === 'datetime') return date.toLocaleString('en-GB');
+  return date.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+}
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+  return res.json();
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
@@ -58,8 +71,13 @@ histTabs.addEventListener('click', (e) => {
 
 // ── Document list ──────────────────────────────────────────────────────────
 async function loadDocList() {
-  const res = await fetch('/api/history');
-  state.docs = await res.json();
+  try {
+    state.docs = await fetchJson('/api/history');
+  } catch (err) {
+    docCount.textContent = 'Unavailable';
+    docList.innerHTML = '<div class="hist-empty">History could not be loaded. Refresh the page after the server restarts.</div>';
+    return;
+  }
   docCount.textContent = `${state.docs.length} document${state.docs.length !== 1 ? 's' : ''}`;
 
   if (!state.docs.length) {
@@ -68,16 +86,19 @@ async function loadDocList() {
   }
 
   docList.innerHTML = state.docs.map((doc) => {
-    const date = doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '';
+    const date = formatDate(doc.created_at);
+    const chunkCount = Number(doc.chunk_count || 0);
     const badges = [
       doc.has_classification && `<span class="hist-badge">Classified</span>`,
       doc.has_section_json   && `<span class="hist-badge done">Output ready</span>`,
       doc.has_llm_logs       && `<span class="hist-badge log">LLM logs</span>`,
+      doc.has_assets         && `<span class="hist-badge">Assets</span>`,
+      !doc.has_docx          && `<span class="hist-badge warn">Artifacts only</span>`,
     ].filter(Boolean).join('');
     return `
       <button class="hist-doc-card" data-doc-id="${escHtml(doc.id)}" type="button">
         <div class="hist-doc-name" ${dirAttr(doc.name)}>${escHtml(doc.name)}</div>
-        <div class="hist-doc-meta">${escHtml(date)} · ${doc.chunk_count} parts</div>
+        <div class="hist-doc-meta">${escHtml(date)} · ${chunkCount} part${chunkCount === 1 ? '' : 's'}</div>
         <div class="hist-doc-badges">${badges}</div>
       </button>`;
   }).join('');
@@ -107,12 +128,12 @@ async function selectDoc(docId) {
   detailName.textContent = doc.name;
   detailName.setAttribute('dir', textDir(doc.name));
   detailEyebrow.textContent = 'Document';
-  const date = doc.created_at ? new Date(doc.created_at).toLocaleString('en-GB') : '';
+  const date = formatDate(doc.created_at, 'datetime');
   detailMeta.textContent = [date, doc.chunk_count && `${doc.chunk_count} parts`].filter(Boolean).join(' · ');
 
   // Download buttons
   detailDownloads.innerHTML = `
-    <a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/docx">&#8659; DOCX</a>
+    ${doc.has_docx ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/docx">&#8659; DOCX</a>` : ''}
     ${doc.has_classification ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/classification">&#8659; Classification</a>` : ''}
     ${doc.has_inspection     ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/inspection">&#8659; Inspection</a>` : ''}
     ${doc.has_section_json   ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/section_json">&#8659; Section JSON</a>` : ''}
@@ -130,23 +151,30 @@ async function selectDoc(docId) {
 async function loadFinal() {
   finalOutputContainer.innerHTML = '<div class="hist-loading">Loading final document…</div>';
   const docId = state.activeDocId;
-  const res = await fetch(`/api/history/${encodeURIComponent(docId)}/final`);
-  if (docId !== state.activeDocId) return;
-  if (!res.ok) {
+  try {
+    const data = await fetchJson(`/api/history/${encodeURIComponent(docId)}/final`);
+    if (docId !== state.activeDocId) return;
+    finalOutputContainer.innerHTML = data.html || '<div class="hist-empty">Empty document.</div>';
+  } catch (err) {
+    if (docId !== state.activeDocId) return;
     finalOutputContainer.innerHTML = '<div class="hist-empty">Final document not available for this entry.</div>';
-    return;
   }
-  const data = await res.json();
-  finalOutputContainer.innerHTML = data.html || '<div class="hist-empty">Empty document.</div>';
 }
 
 // ── Chunks ─────────────────────────────────────────────────────────────────
 async function loadChunks() {
   chunksList.innerHTML = '<div class="hist-loading">Loading chunks…</div>';
   const docId = state.activeDocId;
-  const res = await fetch(`/api/history/${encodeURIComponent(docId)}/chunks`);
+  let chunks = [];
+  try {
+    chunks = await fetchJson(`/api/history/${encodeURIComponent(docId)}/chunks`);
+  } catch (err) {
+    if (docId !== state.activeDocId) return;
+    chunksList.innerHTML = '<div class="hist-empty">Chunks could not be loaded for this document.</div>';
+    return;
+  }
   if (docId !== state.activeDocId) return;
-  const chunks = await res.json();
+  if (!Array.isArray(chunks)) chunks = [];
   state.loadedChunks = chunks;
 
   if (!chunks.length) {
@@ -173,7 +201,7 @@ async function loadChunks() {
 }
 
 // ── LLM Logs ───────────────────────────────────────────────────────────────
-function stageLabel(s) { return {classify:'Classify', inspect:'Inspect', extract:'Extract'}[s] || s; }
+function stageLabel(s) { return {classify:'Classify', inspect:'Inspect', extract:'Extract'}[s] || 'Unknown'; }
 
 function renderLogs() {
   const filterStage = logStageFilter.value;
@@ -190,7 +218,7 @@ function renderLogs() {
   }
 
   logsList.innerHTML = filtered.map((entry, i) => {
-    const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString('en-GB') : '';
+    const ts = formatDate(entry.ts, 'time');
     const statusClass = entry.success === false ? 'fail' : 'ok';
     const statusLabel = entry.success === false ? '✗ Failed' : '✓ OK';
     const stageBadge = `<span class="hist-badge stage-${entry.stage || ''}">${stageLabel(entry.stage)}</span>`;
@@ -200,7 +228,7 @@ function renderLogs() {
     const systemMsg = messages.find((m) => m.role === 'system');
     const userMsgs  = messages.filter((m) => m.role === 'user');
     const lastUser  = userMsgs[userMsgs.length - 1];
-    const retryCount = messages.filter((m) => m.role === 'assistant').length;
+    const attempt = Number(entry.attempt || 1);
 
     return `
       <details class="hist-log-card ${statusClass}">
@@ -209,7 +237,7 @@ function renderLogs() {
           ${stageBadge}
           <span class="hist-log-subject" dir="${subjectDir}">${escHtml(entry.subject || '')}</span>
           <span class="hist-log-ts">${escHtml(ts)}</span>
-          ${retryCount ? `<span class="hist-badge warn">retry ${entry.attempt}</span>` : ''}
+          ${attempt > 1 ? `<span class="hist-badge warn">retry ${attempt}</span>` : ''}
         </summary>
         <div class="hist-log-body">
           <div class="hist-log-meta">
@@ -240,9 +268,15 @@ function renderLogs() {
 async function loadLogs() {
   logsList.innerHTML = '<div class="hist-loading">Loading LLM logs…</div>';
   const docId = state.activeDocId;
-  const res = await fetch(`/api/history/${encodeURIComponent(docId)}/llm-logs`);
+  let logs = [];
+  try {
+    logs = await fetchJson(`/api/history/${encodeURIComponent(docId)}/llm-logs`);
+  } catch (err) {
+    if (docId !== state.activeDocId) return;
+    logsList.innerHTML = '<div class="hist-empty">LLM logs could not be loaded for this document.</div>';
+    return;
+  }
   if (docId !== state.activeDocId) return;
-  const logs = await res.json();
   state.allLogs = Array.isArray(logs) ? logs : [];
   state.loadedLogs = true;
 
@@ -260,9 +294,15 @@ logFailedOnly.addEventListener('change', renderLogs);
 async function loadJsons() {
   jsonsList.innerHTML = '<div class="hist-loading">Loading JSON files…</div>';
   const docId = state.activeDocId;
-  const res = await fetch(`/api/history/${encodeURIComponent(docId)}`);
+  let data = {};
+  try {
+    data = await fetchJson(`/api/history/${encodeURIComponent(docId)}`);
+  } catch (err) {
+    if (docId !== state.activeDocId) return;
+    jsonsList.innerHTML = '<div class="hist-empty">JSON files could not be loaded for this document.</div>';
+    return;
+  }
   if (docId !== state.activeDocId) return;
-  const data = await res.json();
   state.loadedJsons = true;
 
   const sections = [
@@ -293,42 +333,59 @@ async function loadJsons() {
 async function loadAssets() {
   assetsList.innerHTML = '<div class="hist-loading">Loading assets…</div>';
   const docId = state.activeDocId;
-  // Assets are embedded in the detail payload — derive from chunks artifact
-  const res = await fetch(`/api/history/${encodeURIComponent(docId)}`);
+  let data = {};
+  try {
+    data = await fetchJson(`/api/history/${encodeURIComponent(docId)}`);
+  } catch (err) {
+    if (docId !== state.activeDocId) return;
+    assetsList.innerHTML = '<div class="hist-empty">Assets could not be loaded for this document.</div>';
+    return;
+  }
   if (docId !== state.activeDocId) return;
-  const data = await res.json();
   const classification = data.classification;
-  // Build asset list from classification results looking for EM tokens
-  // The actual asset map lives in the chunk artifact dir; serve via the asset endpoint
-  const assetSet = new Set();
+  const knownAssets = Array.isArray(data.assets) ? data.assets.filter((asset) => asset && asset.id) : [];
+  const assetSet = new Map(knownAssets.map((asset) => [String(asset.id), asset]));
   if (classification?.results) {
     for (const result of classification.results) {
       const text = JSON.stringify(result);
-      for (const m of text.matchAll(/EM\d{6}/g)) assetSet.add(m[0]);
+      for (const m of text.matchAll(/EM\d{6}/g)) {
+        if (!assetSet.has(m[0])) assetSet.set(m[0], { id: m[0] });
+      }
     }
   }
   if (data.section_json?.results) {
     const text = JSON.stringify(data.section_json.results);
-    for (const m of text.matchAll(/EM\d{6}/g)) assetSet.add(m[0]);
+    for (const m of text.matchAll(/EM\d{6}/g)) {
+      if (!assetSet.has(m[0])) assetSet.set(m[0], { id: m[0] });
+    }
   }
 
-  const assetIds = [...assetSet].sort();
-  if (!assetIds.length) {
+  const assets = [...assetSet.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  if (!assets.length) {
     assetsList.innerHTML = '<div class="hist-empty">No embedded assets found in this document.</div>';
     return;
   }
 
-  assetsList.innerHTML = assetIds.map((assetId) => `
+  assetsList.innerHTML = assets.map((asset) => {
+    const assetId = String(asset.id);
+    const label = asset.name || assetId;
+    return `
     <div class="hist-asset-card">
       <div class="hist-asset-preview">
         <img src="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}"
              alt="${escHtml(assetId)}"
-             onerror="this.parentElement.innerHTML='<div class=hist-asset-placeholder>Non-image asset</div>'">
+             data-asset-preview>
       </div>
-      <div class="hist-asset-name">${escHtml(assetId)}</div>
+      <div class="hist-asset-name" title="${escHtml(label)}">${escHtml(label)}</div>
       <a class="hist-asset-dl" href="/api/history/${encodeURIComponent(docId)}/asset/${encodeURIComponent(assetId)}" download>&#8659;</a>
     </div>
-  `).join('');
+  `;
+  }).join('');
+  assetsList.querySelectorAll('[data-asset-preview]').forEach((img) => {
+    img.addEventListener('error', () => {
+      img.parentElement.innerHTML = '<div class="hist-asset-placeholder">Preview unavailable</div>';
+    }, { once: true });
+  });
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────

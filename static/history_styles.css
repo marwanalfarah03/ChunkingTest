@@ -2,15 +2,22 @@
 
 body.history-page {
   background:
-    radial-gradient(circle at 10% 8%, rgba(0,149,200,.14), transparent 26rem),
-    radial-gradient(circle at 96% 12%, rgba(206,184,136,.22), transparent 22rem),
+    radial-gradient(circle at 10% 8%, rgba(0,149,200,.18), transparent 26rem),
+    radial-gradient(circle at 96% 12%, rgba(206,184,136,.28), transparent 22rem),
     linear-gradient(135deg, #f4f1e8 0%, #eef4f6 48%, #fbfaf7 100%);
+}
+body.history-page .brand-mark,
+body.history-page .brand-card p,
+body.history-page .eyebrow,
+body.history-page .content-label,
+body.history-page .final-doc-header p {
+  letter-spacing: 0;
 }
 
 /* ── Shell ──────────────────────────────────────────────────────────────── */
 .hist-shell {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -22,13 +29,13 @@ body.history-page {
   display: flex;
   flex-direction: column;
   background:
-    linear-gradient(155deg, rgba(36,55,70,.97), rgba(24,38,50,.99)),
-    radial-gradient(circle at 20% 20%, rgba(0,147,201,.42), transparent 18rem);
+    linear-gradient(155deg, rgba(36,55,70,.96), rgba(24,38,50,.98)),
+    radial-gradient(circle at 20% 20%, rgba(0,147,201,.45), transparent 18rem);
   overflow: hidden;
 }
 
 .hist-sidebar-head {
-  padding: 22px 22px 0;
+  padding: 28px 28px 0;
   flex-shrink: 0;
 }
 
@@ -55,7 +62,7 @@ body.history-page {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 22px 10px;
+  padding: 0 28px 10px;
   flex-shrink: 0;
 }
 .hist-doc-count {
@@ -67,7 +74,7 @@ body.history-page {
 .hist-doc-list {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0 12px 20px;
+  padding: 0 16px 24px;
   display: grid;
   gap: 8px;
   align-content: start;
@@ -82,10 +89,14 @@ body.history-page {
   background: rgba(255,255,255,.06);
   color: white;
   cursor: pointer;
-  transition: background .15s, border-color .15s;
+  transition: background .15s, border-color .15s, box-shadow .15s;
 }
 .hist-doc-card:hover { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.2); }
-.hist-doc-card.active { background: rgba(0,147,201,.22); border-color: rgba(0,147,201,.55); }
+.hist-doc-card.active {
+  background: linear-gradient(90deg, rgba(0,147,201,.24), rgba(0,179,152,.14));
+  border-color: rgba(0,147,201,.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
 
 .hist-doc-name {
   font-weight: 850;
@@ -105,15 +116,39 @@ body.history-page {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 900;
-  background: rgba(255,255,255,.15);
-  color: rgba(255,255,255,.9);
+  background: rgba(0,147,201,.1);
+  border: 1px solid rgba(0,147,201,.16);
+  color: var(--cbo-blue);
 }
-.hist-badge.done  { background: rgba(0,179,152,.28); color: #6efde0; }
-.hist-badge.log   { background: rgba(0,147,201,.28); color: #8ee6ff; }
-.hist-badge.warn  { background: rgba(206,184,136,.3); color: #f8e4a8; }
-.hist-badge.stage-classify { background: rgba(0,147,201,.2); color: #8ee6ff; }
-.hist-badge.stage-inspect  { background: rgba(0,179,152,.2); color: #6efde0; }
-.hist-badge.stage-extract  { background: rgba(206,184,136,.25); color: #f8e4a8; }
+.hist-badge.done,
+.hist-badge.stage-inspect {
+  background: rgba(0,179,152,.12);
+  border-color: rgba(0,179,152,.22);
+  color: #007c6d;
+}
+.hist-badge.log,
+.hist-badge.stage-classify {
+  background: rgba(0,147,201,.12);
+  border-color: rgba(0,147,201,.2);
+  color: var(--cbo-blue);
+}
+.hist-badge.warn,
+.hist-badge.stage-extract {
+  background: rgba(206,184,136,.24);
+  border-color: rgba(206,184,136,.34);
+  color: #5c4a2d;
+}
+.hist-sidebar .hist-badge {
+  color: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.14);
+  border-color: rgba(255,255,255,.16);
+}
+.hist-sidebar .hist-badge.done,
+.hist-sidebar .hist-badge.stage-inspect { background: rgba(0,179,152,.24); }
+.hist-sidebar .hist-badge.log,
+.hist-sidebar .hist-badge.stage-classify { background: rgba(0,147,201,.24); }
+.hist-sidebar .hist-badge.warn,
+.hist-sidebar .hist-badge.stage-extract { background: rgba(206,184,136,.25); }
 
 /* ── Main ───────────────────────────────────────────────────────────────── */
 .hist-main {
@@ -131,7 +166,18 @@ body.history-page {
   gap: 18px;
   text-align: center;
 }
-.hist-welcome-icon { font-size: 64px; }
+.hist-welcome-icon {
+  display: grid;
+  place-items: center;
+  width: 92px;
+  height: 92px;
+  border-radius: 28px;
+  color: white;
+  background: linear-gradient(135deg, var(--cbo-blue), var(--cbo-sky));
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
 .hist-welcome h2 { margin: 0; font-size: 32px; color: var(--cbo-blue); }
 .hist-welcome p { color: rgba(24,38,50,.65); font-size: 16px; max-width: 480px; }
 
@@ -144,11 +190,14 @@ body.history-page {
 }
 .hist-empty a { color: var(--cbo-sky); }
 .hist-loading { padding: 24px; color: rgba(24,38,50,.55); text-align: center; }
+.hist-sidebar .hist-empty,
+.hist-sidebar .hist-loading { color: rgba(255,255,255,.66); }
+.hist-sidebar .hist-empty a { color: var(--cbo-gold); }
 
 /* ── Detail header ──────────────────────────────────────────────────────── */
 .hist-detail-header {
-  background: rgba(255,255,255,.85);
-  border: 1px solid rgba(255,255,255,.9);
+  background: rgba(255,255,255,.78);
+  border: 1px solid rgba(255,255,255,.8);
   border-radius: var(--radius-xl);
   padding: 24px 28px 0;
   box-shadow: var(--shadow);
@@ -169,7 +218,7 @@ body.history-page {
   margin: 4px 0 0;
   font-size: 28px;
   color: var(--cbo-blue);
-  letter-spacing: -.025em;
+  letter-spacing: 0;
   unicode-bidi: isolate;
 }
 
@@ -227,7 +276,7 @@ body.history-page {
 .hist-chunks-list { display: grid; gap: 14px; }
 .hist-chunk-card {
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 24px;
   background: white;
   overflow: hidden;
 }
@@ -244,7 +293,7 @@ body.history-page {
 }
 .hist-chunk-summary::-webkit-details-marker { display: none; }
 .hist-chunk-num  { color: var(--cbo-blue); min-width: 52px; }
-.hist-chunk-file { font-size: 12px; color: rgba(24,38,50,.55); font-family: monospace; }
+.hist-chunk-file { font-size: 12px; color: rgba(24,38,50,.55); font-family: "Cascadia Mono", Consolas, monospace; }
 .hist-chunk-body { padding: 18px 20px; border-top: 1px solid var(--line); }
 
 /* LLM logs */
@@ -271,7 +320,7 @@ body.history-page {
 
 .hist-log-card {
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 18px;
   background: white;
   overflow: hidden;
 }
@@ -321,6 +370,7 @@ body.history-page {
 .hist-log-pre {
   margin: 0;
   padding: 12px;
+  font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
   background: #fafbfc;
@@ -335,7 +385,7 @@ body.history-page {
 .hist-jsons-list { display: grid; gap: 18px; }
 .hist-json-block {
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 24px;
   background: white;
   overflow: hidden;
 }
@@ -360,6 +410,7 @@ body.history-page {
 .hist-json-pre {
   margin: 0;
   padding: 16px 18px;
+  font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
   background: #fafbfc;
@@ -378,7 +429,7 @@ body.history-page {
 }
 .hist-asset-card {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 22px;
   background: white;
   overflow: hidden;
   display: grid;
@@ -408,7 +459,10 @@ body.history-page {
   font-size: 12px;
   font-weight: 850;
   color: var(--cbo-blue);
-  font-family: monospace;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hist-asset-dl {
   display: block;
