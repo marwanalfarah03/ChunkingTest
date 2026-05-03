@@ -790,11 +790,11 @@ class DocumentRenderer:
             f'<button class="hierarchy-shift-button" type="button" data-hierarchy-shift="left" '
             f'data-result-index="{result_index}" data-section-id="{escape(section_id)}" '
             f'data-entry-index="{entry_index}" aria-label="Move this heading left"'
-            f'{"" if can_left else " disabled"}>&lt;-</button>'
+            f'{"" if can_left else " disabled"}><span class="hierarchy-shift-icon" aria-hidden="true">&#8676;</span></button>'
             f'<button class="hierarchy-shift-button" type="button" data-hierarchy-shift="right" '
             f'data-result-index="{result_index}" data-section-id="{escape(section_id)}" '
             f'data-entry-index="{entry_index}" aria-label="Move this heading right"'
-            f'{"" if can_right else " disabled"}>-&gt;</button>'
+            f'{"" if can_right else " disabled"}><span class="hierarchy-shift-icon" aria-hidden="true">&#8677;</span></button>'
             '</span>'
         )
 

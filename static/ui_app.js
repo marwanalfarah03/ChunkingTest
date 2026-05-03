@@ -64,6 +64,21 @@ function show(panel, visible) {
   panel.classList.toggle('hidden', !visible);
 }
 
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    let message = `Request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.error) message = payload.error;
+    } catch (_error) {
+      // Keep the status-based fallback when the response body is not JSON.
+    }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
 function renderSteps(steps = []) {
   stepList.innerHTML = steps.map((step, index) => `
     <li class="step-item ${escapeHtml(step.status)}">
