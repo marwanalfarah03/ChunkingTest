@@ -116,6 +116,35 @@ def normalize_text(value: str) -> str:
     return "\n".join(compacted).strip()
 
 
+def is_grid_table_line(line: str) -> bool:
+    stripped = line.rstrip()
+    return len(stripped) >= 2 and (
+        (stripped.startswith("+") and stripped.endswith("+"))
+        or (stripped.startswith("|") and stripped.endswith("|"))
+    )
+
+
+def normalize_text_preserving_tables(value: str) -> str:
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    compacted: list[str] = []
+    previous_blank = False
+    for line in text.split("\n"):
+        if is_grid_table_line(line):
+            compacted.append(line.rstrip())
+            previous_blank = False
+            continue
+
+        cleaned = re.sub(r"[ \t]+", " ", line).strip()
+        if not cleaned:
+            if not previous_blank and compacted:
+                compacted.append("")
+            previous_blank = True
+            continue
+        compacted.append(cleaned)
+        previous_blank = False
+    return "\n".join(compacted).strip()
+
+
 def split_display_lines(value: str) -> list[str]:
     if not value:
         return [""]
@@ -243,7 +272,7 @@ class PlainTextResolver:
                 cleaned = plain_label(part)
                 if cleaned:
                     text_parts.append(cleaned)
-        result.text = normalize_text("\n".join(text_parts))
+        result.text = normalize_text_preserving_tables("\n".join(text_parts))
         return result
 
     def resolve_cell(self, cell_id: str, *, seen_cells: set[str], seen_tables: set[str]) -> ResolvedValue:
@@ -317,6 +346,9 @@ class PlainTextResolver:
     def render_table_boundary(self, widths: list[int]) -> str:
         return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
 
+    def spanned_inner_width(self, widths: list[int], start_index: int, span: int) -> int:
+        return sum(widths[start_index:start_index + span]) + (3 * (span - 1))
+
     def distribute_table_width(self, widths: list[int], start_index: int, span: int, deficit: int) -> None:
         if deficit <= 0 or span <= 0:
             return
@@ -326,6 +358,63 @@ class PlainTextResolver:
             widths[start_index + offset] += base_increase
             if offset < remainder:
                 widths[start_index + offset] += 1
+
+    def render_grid_table_boundary(
+        self,
+        widths: list[int],
+        occupancy: list[list[dict[str, Any]]],
+        boundary_row: int,
+    ) -> str:
+        column_count = len(widths)
+        above = occupancy[boundary_row - 1] if boundary_row > 0 else [None] * column_count
+        below = occupancy[boundary_row] if boundary_row < len(occupancy) else [None] * column_count
+        edges = [above[column] is not below[column] for column in range(column_count)]
+
+        parts: list[str] = ["+"]
+        for column in range(column_count):
+            parts.append("-" * (widths[column] + 2))
+            if column == column_count - 1:
+                parts.append("+")
+                continue
+
+            vertical_boundary = (above[column] is not above[column + 1]) or (below[column] is not below[column + 1])
+            if vertical_boundary or edges[column] != edges[column + 1]:
+                parts.append("+")
+            else:
+                parts.append("-")
+        return "".join(parts)
+
+    def render_grid_table_row(
+        self,
+        widths: list[int],
+        occupancy: list[list[dict[str, Any]]],
+        row_index: int,
+    ) -> list[str]:
+        row = occupancy[row_index]
+        segments: list[tuple[int, list[str]]] = []
+        column = 0
+        row_height = 1
+        while column < len(widths):
+            cell = row[column]
+            span = 1
+            while column + span < len(widths) and row[column + span] is cell:
+                span += 1
+
+            inner_width = self.spanned_inner_width(widths, column, span)
+            lines = cell["lines"] if cell["start_row"] == row_index and cell["start_index"] == column else [""]
+            row_height = max(row_height, len(lines))
+            segments.append((inner_width, lines))
+            column += span
+
+        rendered_lines: list[str] = []
+        for line_index in range(row_height):
+            parts: list[str] = ["|"]
+            for inner_width, lines in segments:
+                line = lines[line_index] if line_index < len(lines) else ""
+                parts.append(f" {line.ljust(inner_width)} ")
+                parts.append("|")
+            rendered_lines.append("".join(parts))
+        return rendered_lines
 
     def render_resolved_table(
         self,
@@ -340,54 +429,65 @@ class PlainTextResolver:
         if column_count <= 0:
             return ""
 
-        rendered_rows: list[list[dict[str, Any]]] = []
         widths = [1] * column_count
         row_count = self.table_row_count(table, rows)
+        occupancy: list[list[dict[str, Any] | None]] = [[None] * column_count for _ in range(row_count)]
         for row_index in range(1, row_count + 1):
-            rendered_cells: list[dict[str, Any]] = []
             for cell in sorted(rows.get(row_index) or [], key=lambda item: (int(item.get("col") or 0), item["cell_id"])):
                 try:
                     column = max(1, int(cell.get("col") or 1))
                     colspan = max(1, int(cell.get("colspan") or 1))
+                    rowspan = max(1, int(cell.get("rowspan") or 1))
                 except (TypeError, ValueError):
                     column = 1
                     colspan = 1
+                    rowspan = 1
                 start_index = min(column - 1, column_count - 1)
                 colspan = max(1, min(colspan, column_count - start_index))
+                start_row = row_index - 1
+                rowspan = max(1, min(rowspan, row_count - start_row))
                 cell_result = self.resolve_cell(str(cell["cell_id"]), seen_cells=seen_cells, seen_tables=seen_tables)
                 result.merge(cell_result)
                 lines = split_display_lines(cell_result.text)
                 needed_width = max((len(line) for line in lines), default=1)
-                current_width = sum(widths[start_index:start_index + colspan]) + (3 * (colspan - 1))
+                current_width = self.spanned_inner_width(widths, start_index, colspan)
                 self.distribute_table_width(widths, start_index, colspan, needed_width - current_width)
-                rendered_cells.append(
-                    {
-                        "start_index": start_index,
-                        "colspan": colspan,
-                        "lines": lines,
-                    }
-                )
-            if rendered_cells:
-                rendered_rows.append(rendered_cells)
+                rendered_cell = {
+                    "start_row": start_row,
+                    "start_index": start_index,
+                    "colspan": colspan,
+                    "rowspan": rowspan,
+                    "lines": lines,
+                }
+                for row_offset in range(rowspan):
+                    target_row = start_row + row_offset
+                    for column_offset in range(colspan):
+                        target_column = start_index + column_offset
+                        if target_row < row_count and target_column < column_count:
+                            occupancy[target_row][target_column] = rendered_cell
 
-        if not rendered_rows:
+        if not any(any(cell is not None for cell in row) for row in occupancy):
             return ""
 
-        boundary = self.render_table_boundary(widths)
-        output_lines = [boundary]
-        for row_cells in rendered_rows:
-            row_height = max((len(cell["lines"]) for cell in row_cells), default=1)
-            for line_index in range(row_height):
-                parts = ["|"]
-                for cell in row_cells:
-                    start_index = int(cell["start_index"])
-                    colspan = int(cell["colspan"])
-                    inner_width = sum(widths[start_index:start_index + colspan]) + (3 * (colspan - 1))
-                    line = cell["lines"][line_index] if line_index < len(cell["lines"]) else ""
-                    parts.append(f" {line.ljust(inner_width)} ")
-                    parts.append("|")
-                output_lines.append("".join(parts))
-            output_lines.append(boundary)
+        filled_occupancy: list[list[dict[str, Any]]] = []
+        for row_index, row in enumerate(occupancy):
+            filled_row: list[dict[str, Any]] = []
+            for column_index, cell in enumerate(row):
+                if cell is None:
+                    cell = {
+                        "start_row": row_index,
+                        "start_index": column_index,
+                        "colspan": 1,
+                        "rowspan": 1,
+                        "lines": [""],
+                    }
+                filled_row.append(cell)
+            filled_occupancy.append(filled_row)
+
+        output_lines = [self.render_grid_table_boundary(widths, filled_occupancy, 0)]
+        for row_index in range(row_count):
+            output_lines.extend(self.render_grid_table_row(widths, filled_occupancy, row_index))
+            output_lines.append(self.render_grid_table_boundary(widths, filled_occupancy, row_index + 1))
         return "\n".join(output_lines)
 
     def resolve_table(self, table_id: str, *, seen_cells: set[str], seen_tables: set[str]) -> ResolvedValue:
@@ -407,7 +507,7 @@ class PlainTextResolver:
         for cell in cells:
             rows.setdefault(int(cell.get("row") or 0), []).append(cell)
         column_count = self.table_column_count(table_id, table, cells)
-        result.text = normalize_text(
+        result.text = normalize_text_preserving_tables(
             self.render_resolved_table(
                 rows,
                 table=table,
@@ -487,7 +587,7 @@ def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, s
 
     for label, value in content_blocks:
         clean_label = plain_label(label)
-        clean_value = normalize_text(value)
+        clean_value = normalize_text_preserving_tables(value)
         if not clean_value:
             continue
         if clean_label:
@@ -495,7 +595,7 @@ def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, s
         content_lines.append(clean_value)
         content_lines.append("")
 
-    content = normalize_text("\n".join(content_lines))
+    content = normalize_text_preserving_tables("\n".join(content_lines))
     metadata["content_character_count"] = len(content)
     return content + "\n"
 
@@ -613,7 +713,7 @@ def active_header_index_path(active_headers: list[dict[str, Any]]) -> list[int]:
 
 
 def merge_sources(items: list[ResolvedValue], *, text: str = "") -> ResolvedValue:
-    merged = ResolvedValue(text=normalize_text(text))
+    merged = ResolvedValue(text=normalize_text_preserving_tables(text))
     for item in items:
         merged.cell_ids.update(item.cell_ids)
         merged.table_ids.update(item.table_ids)
