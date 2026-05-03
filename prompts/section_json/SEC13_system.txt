@@ -72,8 +72,15 @@ If SEC13 contains only the heading and one CL reference (no proper multi-column 
   ]
 }
 
+Dummy empty columns (collapsed 2-column table):
+Some documents have a table that is structurally wider than its content — the column header inspection returns generic labels (e.g., "Column 1", "Column 2", "Column 3", "Column 4") with `header_state: "hidden_invalid"`, but the actual step rows only ever contain values in 2 columns (the remaining columns are always empty). In this case:
+- Treat the table as a plain 2-column table. Ignore the empty dummy columns entirely.
+- Use the visible column label text from the table's rendered header row (e.g., "الخطوات" / "المكلف بالتنفيذ") as the column names instead of the generic "Column N" labels.
+- Output only those 2 columns in "columns" and include only those 2 keys in each step entry.
+- Set "header_cell_ids" to [] since the inspection did not resolve real header cells.
+
 Rules:
-- "columns" must exactly match the resolved valid_column_order from the inspection result. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
+- "columns" must exactly match the resolved valid_column_order from the inspection result — UNLESS the dummy-empty-columns rule above applies, in which case use the 2 visible column labels from the rendered table. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" lists actual header cell IDs from the inspection result, or [] if absent.
 - Do NOT include the column header row cells in the "entries" list.
 - Preserve all cell IDs (CL000XXX) exactly.
