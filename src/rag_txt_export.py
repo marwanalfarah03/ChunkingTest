@@ -50,6 +50,13 @@ SECTION_ENGLISH = {
     "SEC99": "Other / Unclassified",
 }
 
+WORKFLOW_HEADER_LEVELS = {
+    "group_header": 1,
+    "subgroup_header": 2,
+    "sub_subgroup_header": 3,
+    "subsubgroup_header": 3,
+}
+
 CL_TOKEN_RE = re.compile(r"CL\d{6}")
 TB_TOKEN_RE = re.compile(r"<TB\d{6}>")
 EM_TOKEN_RE = re.compile(r"<EM\d{6}>")
@@ -596,6 +603,15 @@ def section_hierarchy(section_id: str, section_heading: str) -> list[dict[str, A
     ]
 
 
+def active_header_index_path(active_headers: list[dict[str, Any]]) -> list[int]:
+    if not active_headers:
+        return []
+    index_path = active_headers[-1].get("index_path")
+    if isinstance(index_path, list):
+        return [int(index) for index in index_path if isinstance(index, int)]
+    return []
+
+
 def merge_sources(items: list[ResolvedValue], *, text: str = "") -> ResolvedValue:
     merged = ResolvedValue(text=normalize_text(text))
     for item in items:
@@ -741,14 +757,7 @@ def export_workflow_entries(
     chunks: list[dict[str, Any]] = []
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
-    header_levels = {
-        "group_header": 1,
-        "subgroup_header": 2,
-        "sub_subgroup_header": 3,
-        "subsubgroup_header": 3,
-    }
     level_counters: list[int] = []
-    active_indices: list[int] = []
     active_headers: list[dict[str, Any]] = []
     item_index = 0
 
@@ -756,24 +765,62 @@ def export_workflow_entries(
         if not isinstance(entry, dict):
             continue
         entry_type = str(entry.get("type") or "")
-        if entry_type in header_levels:
-            level = min(header_levels[entry_type], len(level_counters) + 1)
-            level_counters = level_counters[:level]
-            while len(level_counters) < level:
+        if entry_type in WORKFLOW_HEADER_LEVELS:
+            semantic_level = WORKFLOW_HEADER_LEVELS[entry_type]
+            while active_headers and int(active_headers[-1].get("semantic_level") or 0) >= semantic_level:
+                active_headers.pop()
+
+            effective_level = len(active_headers) + 1
+            level_counters = level_counters[:effective_level]
+            while len(level_counters) < effective_level:
                 level_counters.append(0)
-            level_counters[level - 1] += 1
-            active_indices = level_counters[:]
-            active_headers = active_headers[: level - 1]
+            level_counters[effective_level - 1] += 1
+            index_path = level_counters[:effective_level]
             active_headers.append(
                 {
-                    "level": level + 1,
+                    "level": effective_level + 1,
                     "type": entry_type,
-                    "index": active_indices[-1],
-                    "index_path": active_indices[:],
+                    "semantic_level": semantic_level,
+                    "index": index_path[-1],
+                    "index_path": index_path[:],
                     "title": plain_label(entry.get("heading")),
                 }
             )
             item_index = 0
+            continue
+        if entry_type == "content":
+            resolved = resolver.resolve(entry.get("value"))
+            if not resolved.text:
+                continue
+
+            item_index += 1
+            active_indices = active_header_index_path(active_headers)
+            hierarchy_numbers = active_indices + [item_index]
+            base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
+            file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
+            hierarchy = section_hierarchy(section_id, section_heading)
+            hierarchy.extend(active_headers)
+            indices = {"path": hierarchy_numbers}
+            metadata = base_metadata(
+                payload=payload,
+                result=result,
+                section_json=section_json,
+                section_id=section_id,
+                chunk_type="workflow_content",
+                hierarchy=hierarchy,
+                indices=indices,
+                output_file_name=file_name,
+                resolved_values=[resolved],
+                document_header=document_header,
+            )
+            chunks.append(
+                write_chunk(
+                    output_dir=output_dir,
+                    output_file_name=file_name,
+                    metadata=metadata,
+                    content_blocks=[("Content", resolved.text)],
+                )
+            )
             continue
         if entry_type != "step":
             continue
@@ -786,6 +833,7 @@ def export_workflow_entries(
             continue
 
         item_index += 1
+        active_indices = active_header_index_path(active_headers)
         hierarchy_numbers = active_indices + [item_index]
         base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
         file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
@@ -844,9 +892,11 @@ def export_general_instruction_entries(
         else:
             entry_type = str(entry.get("type") or "content")
             heading = plain_label(entry.get("heading") or "")
-            value = entry.get("value")
-            if value is None and isinstance(entry.get("values"), list):
-                value = entry.get("values")
+            values: list[Any] = []
+            if "value" in entry and entry.get("value") is not None:
+                values.append(entry.get("value"))
+            if isinstance(entry.get("values"), list):
+                values.extend(entry.get("values") or [])
 
         if entry_type == "subsection":
             subsection_index += 1
@@ -855,47 +905,53 @@ def export_general_instruction_entries(
         elif entry_type not in {"content", "subsection"}:
             heading = heading or plain_label(entry_type)
 
-        resolved = resolver.resolve(value)
-        if not resolved.text:
-            continue
+        if not isinstance(entry, dict):
+            values = [value]
+        elif "values" not in entry and "value" not in entry:
+            values = [entry]
 
-        item_index += 1
-        hierarchy_numbers = ([subsection_index] if subsection_index else []) + [item_index]
-        base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
-        file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
-        hierarchy = section_hierarchy(section_id, section_heading)
-        if active_heading:
-            hierarchy.append(
-                {
-                    "level": 2,
-                    "type": "subsection",
-                    "index": subsection_index,
-                    "index_path": [subsection_index],
-                    "title": active_heading,
-                }
-            )
-        indices = {"path": hierarchy_numbers}
-        metadata = base_metadata(
-            payload=payload,
-            result=result,
-            section_json=section_json,
-            section_id=section_id,
-            chunk_type="general_instruction",
-            hierarchy=hierarchy,
-            indices=indices,
-            output_file_name=file_name,
-            resolved_values=[resolved],
-            document_header=document_header,
-        )
-        label = heading if heading else "Instruction"
-        chunks.append(
-            write_chunk(
-                output_dir=output_dir,
+        for value in values:
+            resolved = resolver.resolve(value)
+            if not resolved.text:
+                continue
+
+            item_index += 1
+            hierarchy_numbers = ([subsection_index] if subsection_index else []) + [item_index]
+            base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
+            file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
+            hierarchy = section_hierarchy(section_id, section_heading)
+            if active_heading:
+                hierarchy.append(
+                    {
+                        "level": 2,
+                        "type": "subsection",
+                        "index": subsection_index,
+                        "index_path": [subsection_index],
+                        "title": active_heading,
+                    }
+                )
+            indices = {"path": hierarchy_numbers}
+            metadata = base_metadata(
+                payload=payload,
+                result=result,
+                section_json=section_json,
+                section_id=section_id,
+                chunk_type="general_instruction",
+                hierarchy=hierarchy,
+                indices=indices,
                 output_file_name=file_name,
-                metadata=metadata,
-                content_blocks=[(label, resolved.text)],
+                resolved_values=[resolved],
+                document_header=document_header,
             )
-        )
+            label = heading if heading else "Instruction"
+            chunks.append(
+                write_chunk(
+                    output_dir=output_dir,
+                    output_file_name=file_name,
+                    metadata=metadata,
+                    content_blocks=[(label, resolved.text)],
+                )
+            )
     return chunks
 
 
