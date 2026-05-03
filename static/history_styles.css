@@ -458,35 +458,12 @@ body.history-page .final-doc-header p {
   height: 100%;
   object-fit: contain;
 }
-.hist-asset-preview-link {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  text-decoration: none;
-}
 .hist-asset-placeholder {
   color: rgba(24,38,50,.45);
   font-size: 12px;
   font-style: italic;
   padding: 12px;
   text-align: center;
-}
-.hist-asset-placeholder-action {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-content: center;
-  gap: 6px;
-  font-style: normal;
-}
-.hist-asset-placeholder-action strong {
-  color: var(--cbo-blue);
-  font-size: 18px;
-  letter-spacing: .08em;
-}
-.hist-asset-placeholder-action span {
-  color: rgba(24,38,50,.58);
-  font-size: 12px;
 }
 .hist-asset-name {
   padding: 8px 12px 4px;
@@ -497,13 +474,6 @@ body.history-page .final-doc-header p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.hist-asset-name-link {
-  display: block;
-  text-decoration: none;
-}
-.hist-asset-name-link:hover {
-  color: var(--cbo-sky);
 }
 .hist-asset-dl {
   display: block;
