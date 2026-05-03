@@ -62,7 +62,7 @@ Format B — Glossary table:
 Format C — Multi-section:
 {
   "section_id": "SEC18",
-  "section_heading": "<first sub-heading text, or a combined label>",
+  "section_heading": "التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)",
   "format": "sections",
   "entries": [
     {
@@ -86,6 +86,7 @@ Rules:
 - Use Format A when there is a single heading followed by a single content block.
 - Use Format B when the section has a column-header row and multiple definition rows.
 - Use Format C when there are multiple named sub-blocks (each with its own heading), regardless of how many source tables they came from.
+- For Format C, set `section_heading` to the canonical SEC18 section label `التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)`; do NOT copy one of the subsection headings into `section_heading`.
 - Recognize SEC18 headings in any language — do NOT return not_found just because the heading is in English or uses a different phrasing.
 - For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - For Format B: "columns" lists column labels (visible text or CL IDs if hidden); "header_cell_ids" lists the actual header cell IDs if present, otherwise [].
@@ -124,7 +125,7 @@ Example output (Format B — Arabic):
 Example output (Format C — English, multi-section):
 {
   "section_id": "SEC18",
-  "section_heading": "3. Terms and Definitions [#253744]",
+  "section_heading": "التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)",
   "format": "sections",
   "entries": [
     {

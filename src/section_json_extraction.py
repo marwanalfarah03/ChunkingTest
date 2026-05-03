@@ -195,7 +195,30 @@ def parse_section_json_response(
             f"Response section_id {resp_section_id!r} does not match expected {section_id!r}."
         )
 
+    payload = normalize_section_json_payload(payload, section_id)
     return payload
+
+
+def normalize_section_json_payload(
+    payload: dict[str, Any],
+    section_id: str,
+) -> dict[str, Any]:
+    if section_id != "SEC18":
+        return payload
+    if str(payload.get("format") or "") != "sections":
+        return payload
+
+    section_meta = SECTION_INDEX.get(section_id) or {}
+    arabic = str(section_meta.get("arabic") or "").strip()
+    english = str(section_meta.get("english") or "").strip()
+    if arabic and english:
+        normalized_heading = f"{arabic} ({english})"
+    else:
+        normalized_heading = arabic or english or str(payload.get("section_heading") or "").strip()
+
+    normalized = dict(payload)
+    normalized["section_heading"] = normalized_heading
+    return normalized
 
 
 def request_section_json(
