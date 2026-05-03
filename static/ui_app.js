@@ -221,6 +221,33 @@ async function loadFinal() {
   state.finalLoaded = true;
 }
 
+finalDocument.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-hierarchy-shift]');
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (button.disabled) return;
+
+  const resultIndex = Number(button.dataset.resultIndex);
+  const entryIndex = Number(button.dataset.entryIndex);
+  const direction = String(button.dataset.hierarchyShift || '');
+  if (!Number.isFinite(resultIndex) || !Number.isFinite(entryIndex) || !direction) return;
+
+  button.disabled = true;
+  try {
+    const payload = await fetchJson('/api/final/hierarchy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result_index: resultIndex, entry_index: entryIndex, direction }),
+    });
+    finalDocument.innerHTML = payload.html || '';
+    state.finalLoaded = true;
+  } catch (err) {
+    window.alert(err.message || 'Could not update hierarchy.');
+    button.disabled = false;
+  }
+});
+
 async function resetAndShowUpload() {
   await fetch('/api/reset', { method: 'POST' });
   state.finalLoaded = false;

@@ -67,6 +67,25 @@ INVISIBLE_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u
 UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
+def workflow_entry_level(entry: dict[str, Any]) -> int | None:
+    entry_type = str(entry.get("type") or "")
+    if entry_type not in WORKFLOW_HEADER_LEVELS:
+        return None
+    try:
+        return max(1, int(entry.get("level") or WORKFLOW_HEADER_LEVELS[entry_type]))
+    except (TypeError, ValueError):
+        return WORKFLOW_HEADER_LEVELS[entry_type]
+
+
+def subsection_entry_level(entry: dict[str, Any]) -> int | None:
+    if str(entry.get("type") or "") != "subsection":
+        return None
+    try:
+        return max(1, int(entry.get("level") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def text_quality(value: str) -> int:
     arabic = sum(1 for ch in value if "\u0600" <= ch <= "\u06ff")
     mojibake = sum(value.count(marker) for marker in ("\u00d8", "\u00d9", "\u00c3", "\u00c2", "\u00e2"))
@@ -866,7 +885,7 @@ def export_workflow_entries(
             continue
         entry_type = str(entry.get("type") or "")
         if entry_type in WORKFLOW_HEADER_LEVELS:
-            semantic_level = WORKFLOW_HEADER_LEVELS[entry_type]
+            semantic_level = workflow_entry_level(entry) or WORKFLOW_HEADER_LEVELS[entry_type]
             while active_headers and int(active_headers[-1].get("semantic_level") or 0) >= semantic_level:
                 active_headers.pop()
 
@@ -981,9 +1000,9 @@ def export_general_instruction_entries(
     chunks: list[dict[str, Any]] = []
     section_heading = plain_label(section_json.get("section_heading") or SECTION_ENGLISH.get(section_id, section_id))
 
-    subsection_index = 0
+    level_counters: list[int] = []
+    active_headers: list[dict[str, Any]] = []
     item_index = 0
-    active_heading = ""
     for entry in entries:
         if not isinstance(entry, dict):
             value = entry
@@ -998,10 +1017,28 @@ def export_general_instruction_entries(
             if isinstance(entry.get("values"), list):
                 values.extend(entry.get("values") or [])
 
-        if entry_type == "subsection":
-            subsection_index += 1
+        semantic_level = subsection_entry_level(entry) if isinstance(entry, dict) else None
+        if semantic_level is not None:
+            while active_headers and int(active_headers[-1].get("semantic_level") or 0) >= semantic_level:
+                active_headers.pop()
+
+            effective_level = len(active_headers) + 1
+            level_counters = level_counters[:effective_level]
+            while len(level_counters) < effective_level:
+                level_counters.append(0)
+            level_counters[effective_level - 1] += 1
+            index_path = level_counters[:effective_level]
+            active_headers.append(
+                {
+                    "level": effective_level + 1,
+                    "type": "subsection",
+                    "semantic_level": semantic_level,
+                    "index": index_path[-1],
+                    "index_path": index_path[:],
+                    "title": heading,
+                }
+            )
             item_index = 0
-            active_heading = heading
         elif entry_type not in {"content", "subsection"}:
             heading = heading or plain_label(entry_type)
 
@@ -1016,20 +1053,12 @@ def export_general_instruction_entries(
                 continue
 
             item_index += 1
-            hierarchy_numbers = ([subsection_index] if subsection_index else []) + [item_index]
+            active_indices = active_header_index_path(active_headers)
+            hierarchy_numbers = active_indices + [item_index]
             base_name = f"{prefix}_{format_number_path(hierarchy_numbers)}.txt"
             file_name = ordered_file_name(base_name, order_state=order_state, used_names=used_names)
             hierarchy = section_hierarchy(section_id, section_heading)
-            if active_heading:
-                hierarchy.append(
-                    {
-                        "level": 2,
-                        "type": "subsection",
-                        "index": subsection_index,
-                        "index_path": [subsection_index],
-                        "title": active_heading,
-                    }
-                )
+            hierarchy.extend(active_headers)
             indices = {"path": hierarchy_numbers}
             metadata = base_metadata(
                 payload=payload,
@@ -1151,7 +1180,7 @@ def export_rag_txt_files(
                     document_header=document_header,
                 )
             )
-        elif section_id == "SEC11" and isinstance(entries, list):
+        elif section_id in {"SEC11", "SEC18"} and isinstance(entries, list):
             chunks.extend(
                 export_general_instruction_entries(
                     output_dir=output_dir,

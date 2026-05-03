@@ -201,6 +201,36 @@ async function loadFinal() {
   }
 }
 
+finalOutputContainer.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-hierarchy-shift]');
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (button.disabled || !state.activeDocId) return;
+
+  const resultIndex = Number(button.dataset.resultIndex);
+  const entryIndex = Number(button.dataset.entryIndex);
+  const direction = String(button.dataset.hierarchyShift || '');
+  if (!Number.isFinite(resultIndex) || !Number.isFinite(entryIndex) || !direction) return;
+
+  const docId = state.activeDocId;
+  button.disabled = true;
+  try {
+    const data = await fetchJson(`/api/history/${encodeURIComponent(docId)}/final/hierarchy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result_index: resultIndex, entry_index: entryIndex, direction }),
+    });
+    if (docId !== state.activeDocId) return;
+    finalOutputContainer.innerHTML = data.html || '<div class="hist-empty">Empty document.</div>';
+  } catch (err) {
+    if (docId === state.activeDocId) {
+      window.alert(err.message || 'Could not update hierarchy.');
+      button.disabled = false;
+    }
+  }
+});
+
 // ── Chunks ─────────────────────────────────────────────────────────────────
 async function loadChunks() {
   chunksList.innerHTML = '<div class="hist-loading">Loading chunks…</div>';

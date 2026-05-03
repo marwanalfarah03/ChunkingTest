@@ -48,6 +48,13 @@ LTR_CHAR_RE = re.compile(r"[A-Za-z]")
 FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
 INVISIBLE_CHARS_RE = re.compile(r"[​‌‍‎‏‪-‮⁠﻿]")
 
+WORKFLOW_HEADER_LEVELS = {
+    "group_header": 1,
+    "subgroup_header": 2,
+    "sub_subgroup_header": 3,
+    "subsubgroup_header": 3,
+}
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
 
@@ -411,6 +418,92 @@ def load_json_file(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def workflow_header_type_for_level(level: int) -> str:
+    if level <= 1:
+        return "group_header"
+    if level == 2:
+        return "subgroup_header"
+    return "sub_subgroup_header"
+
+
+def hierarchy_entry_level(section_id: str, entry: Any) -> int | None:
+    if not isinstance(entry, dict):
+        return None
+    entry_type = str(entry.get("type") or "")
+    if entry_type == "subsection":
+        try:
+            return max(1, int(entry.get("level") or 1))
+        except (TypeError, ValueError):
+            return 1
+    if section_id in {"SEC12", "SEC13"} and entry_type in WORKFLOW_HEADER_LEVELS:
+        try:
+            return max(1, int(entry.get("level") or WORKFLOW_HEADER_LEVELS[entry_type]))
+        except (TypeError, ValueError):
+            return WORKFLOW_HEADER_LEVELS[entry_type]
+    return None
+
+
+def assign_hierarchy_entry_level(section_id: str, entry: dict[str, Any], level: int) -> None:
+    normalized_level = max(1, int(level))
+    entry_type = str(entry.get("type") or "")
+    if entry_type == "subsection":
+        if normalized_level == 1:
+            entry.pop("level", None)
+        else:
+            entry["level"] = normalized_level
+        return
+    if section_id in {"SEC12", "SEC13"} and entry_type in WORKFLOW_HEADER_LEVELS:
+        entry["level"] = normalized_level
+        entry["type"] = workflow_header_type_for_level(normalized_level)
+
+
+def previous_hierarchy_level(section_id: str, entries: list[Any], entry_index: int) -> int:
+    for candidate_index in range(entry_index - 1, -1, -1):
+        level = hierarchy_entry_level(section_id, entries[candidate_index])
+        if level is not None:
+            return level
+    return 0
+
+
+def descendant_hierarchy_span(section_id: str, entries: list[Any], entry_index: int, root_level: int) -> range:
+    end_index = entry_index + 1
+    for candidate_index in range(entry_index + 1, len(entries)):
+        candidate_level = hierarchy_entry_level(section_id, entries[candidate_index])
+        if candidate_level is not None and candidate_level <= root_level:
+            break
+        end_index = candidate_index + 1
+    return range(entry_index, end_index)
+
+
+def shift_hierarchy_entries(section_id: str, entries: list[Any], entry_index: int, direction: str) -> tuple[list[Any], bool]:
+    if direction not in {"left", "right"}:
+        raise ValueError("Hierarchy direction must be 'left' or 'right'.")
+    if entry_index < 0 or entry_index >= len(entries):
+        raise IndexError("Hierarchy entry index is out of range.")
+
+    updated_entries = [dict(entry) if isinstance(entry, dict) else entry for entry in entries]
+    original_level = hierarchy_entry_level(section_id, updated_entries[entry_index])
+    if original_level is None:
+        raise ValueError("Only hierarchy headers can be shifted.")
+
+    delta = -1 if direction == "left" else 1
+    candidate_level = max(1, original_level + delta)
+    if delta > 0:
+        candidate_level = min(candidate_level, previous_hierarchy_level(section_id, updated_entries, entry_index) + 1)
+    if candidate_level == original_level:
+        return updated_entries, False
+
+    subtree = descendant_hierarchy_span(section_id, updated_entries, entry_index, original_level)
+    level_delta = candidate_level - original_level
+    for candidate_index in subtree:
+        entry = updated_entries[candidate_index]
+        level = hierarchy_entry_level(section_id, entry)
+        if level is None or not isinstance(entry, dict):
+            continue
+        assign_hierarchy_entry_level(section_id, entry, level + level_delta)
+    return updated_entries, True
+
+
 class DocumentRenderer:
     def __init__(
         self,
@@ -681,6 +774,30 @@ class DocumentRenderer:
             f'{label_html}{self.render_rich_text(value)}</div>'
         )
 
+    def render_hierarchy_shift_controls(
+        self,
+        section_id: str,
+        entries: list[Any],
+        result_index: int,
+        entry_index: int,
+    ) -> str:
+        level = hierarchy_entry_level(section_id, entries[entry_index]) or 1
+        max_right_level = previous_hierarchy_level(section_id, entries, entry_index) + 1
+        can_left = level > 1
+        can_right = level < max_right_level
+        return (
+            '<span class="hierarchy-shift-controls" role="group" aria-label="Adjust hierarchy depth">'
+            f'<button class="hierarchy-shift-button" type="button" data-hierarchy-shift="left" '
+            f'data-result-index="{result_index}" data-section-id="{escape(section_id)}" '
+            f'data-entry-index="{entry_index}" aria-label="Move this heading left"'
+            f'{"" if can_left else " disabled"}>&lt;-</button>'
+            f'<button class="hierarchy-shift-button" type="button" data-hierarchy-shift="right" '
+            f'data-result-index="{result_index}" data-section-id="{escape(section_id)}" '
+            f'data-entry-index="{entry_index}" aria-label="Move this heading right"'
+            f'{"" if can_right else " disabled"}>-&gt;</button>'
+            '</span>'
+        )
+
     def render_simple_rows(self, rows: list[Any]) -> str:
         if not rows:
             return ""
@@ -733,23 +850,23 @@ class DocumentRenderer:
         html.append("</tbody></table></div>")
         return "".join(html)
 
-    def render_hierarchy_entries(self, entries: list[Any]) -> str:
+    def render_hierarchy_entries(self, section_id: str, entries: list[Any], result_index: int) -> str:
         html: list[str] = ['<div class="hierarchy-list hierarchy-collapsible">']
-        subsection_open = False
+        open_levels: list[int] = []
 
-        def close_subsection() -> None:
-            nonlocal subsection_open
-            if subsection_open:
+        def close_to_level(level: int) -> None:
+            while open_levels and open_levels[-1] >= level:
                 html.append("</div></details>")
-                subsection_open = False
+                open_levels.pop()
 
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             if not isinstance(entry, dict):
-                html.append(self.render_content_card(entry, nested=subsection_open))
+                html.append(self.render_content_card(entry, nested=bool(open_levels)))
                 continue
-            entry_type = entry.get("type")
-            if entry_type == "subsection":
-                close_subsection()
+            entry_type = str(entry.get("type") or "")
+            header_level = hierarchy_entry_level(section_id, entry)
+            if entry_type == "subsection" and header_level is not None:
+                close_to_level(header_level)
                 heading = entry.get("heading") or "Subsection"
                 heading_label, heading_color = extract_display_color(heading)
                 style = (
@@ -758,24 +875,27 @@ class DocumentRenderer:
                     else ""
                 )
                 heading_direction = dominant_direction(heading_label)
+                controls = self.render_hierarchy_shift_controls(section_id, entries, result_index, entry_index)
                 html.append(
-                    f'<details class="collapsible-node hierarchy-node hierarchy-subsection-node" open{style}>'
+                    f'<details class="collapsible-node hierarchy-node hierarchy-subsection-node" '
+                    f'data-hierarchy-level="{header_level}" open{style}>'
                     f'<summary class="collapsible-summary hierarchy-subsection-summary text-{heading_direction}" '
                     f'dir="{heading_direction}"><span class="collapse-marker" aria-hidden="true"></span>'
-                    f'<span class="summary-label">{self.render_inline_text(heading_label)}</span></summary>'
+                    f'<span class="summary-label">{self.render_inline_text(heading_label)}</span>'
+                    f'{controls}</summary>'
                     '<div class="collapsible-body hierarchy-node-body">'
                 )
                 if "value" in entry:
                     html.append(self.render_content_card(entry.get("value"), nested=True))
                 for value in entry.get("values") or []:
                     html.append(self.render_content_card(value, nested=True))
-                subsection_open = True
+                open_levels.append(header_level)
             elif entry_type == "content":
-                html.append(self.render_content_card(entry.get("value"), nested=subsection_open))
+                html.append(self.render_content_card(entry.get("value"), nested=bool(open_levels)))
             else:
                 label = repair_text(entry_type or "Item")
-                html.append(self.render_content_card(entry.get("value") or entry, label=label, nested=subsection_open))
-        close_subsection()
+                html.append(self.render_content_card(entry.get("value") or entry, label=label, nested=bool(open_levels)))
+        close_to_level(1)
         html.append("</div>")
         return "".join(html)
 
@@ -790,13 +910,12 @@ class DocumentRenderer:
                     return list(keys)
         return ["Step", "Owner"]
 
-    def render_workflow_entries(self, data: dict[str, Any]) -> str:
+    def render_workflow_entries(self, section_id: str, data: dict[str, Any], result_index: int) -> str:
         entries = data.get("entries") or []
         columns = self.workflow_columns(data, entries)
         html: list[str] = ['<div class="workflow-view workflow-collapsible">']
         table_open = False
-        group_open = False
-        subgroup_open = False
+        open_levels: list[int] = []
         pending_steps: list[dict[str, Any]] = []
 
         def compute_rowspans(steps: list[dict[str, Any]]) -> list[list[int]]:
@@ -889,7 +1008,13 @@ class DocumentRenderer:
                 html.append("</tbody></table></div>")
                 table_open = False
 
-        def open_node(kind: str, heading: Any) -> None:
+        def close_to_level(level: int) -> None:
+            close_table()
+            while open_levels and open_levels[-1] >= level:
+                html.append("</div></details>")
+                open_levels.pop()
+
+        def open_node(level: int, heading: Any, entry_index: int) -> None:
             heading_label, heading_color = extract_display_color(heading or "")
             style = (
                 f' style="--group-color: {heading_color}; --group-text: {color_text(heading_color)}"'
@@ -897,29 +1022,22 @@ class DocumentRenderer:
                 else ""
             )
             heading_direction = dominant_direction(heading_label)
-            node_class = "workflow-group-node" if kind == "group" else "workflow-subgroup-node"
-            summary_class = "workflow-group-summary" if kind == "group" else "workflow-subgroup-summary"
+            node_class = "workflow-group-node" if level == 1 else "workflow-subgroup-node"
+            summary_class = "workflow-group-summary" if level == 1 else "workflow-subgroup-summary"
+            if level >= 3:
+                node_class += " workflow-deep-node"
+                summary_class += " workflow-deep-summary"
+            controls = self.render_hierarchy_shift_controls(section_id, entries, result_index, entry_index)
             html.append(
-                f'<details class="collapsible-node workflow-node {node_class}" open{style}>'
+                f'<details class="collapsible-node workflow-node {node_class}" '
+                f'data-hierarchy-level="{level}" open{style}>'
                 f'<summary class="collapsible-summary {summary_class} text-{heading_direction}" '
                 f'dir="{heading_direction}"><span class="collapse-marker" aria-hidden="true"></span>'
-                f'<span class="summary-label">{self.render_inline_text(heading_label)}</span></summary>'
+                f'<span class="summary-label">{self.render_inline_text(heading_label)}</span>'
+                f'{controls}</summary>'
                 '<div class="collapsible-body workflow-node-body">'
             )
-
-        def close_subgroup() -> None:
-            nonlocal subgroup_open
-            close_table()
-            if subgroup_open:
-                html.append("</div></details>")
-                subgroup_open = False
-
-        def close_group() -> None:
-            nonlocal group_open
-            close_subgroup()
-            if group_open:
-                html.append("</div></details>")
-                group_open = False
+            open_levels.append(level)
 
         def open_table() -> None:
             nonlocal table_open
@@ -936,20 +1054,16 @@ class DocumentRenderer:
             html.append("</tr></thead><tbody>")
             table_open = True
 
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             if not isinstance(entry, dict):
                 close_table()
                 html.append(self.render_content_card(entry))
                 continue
-            entry_type = entry.get("type")
-            if entry_type == "group_header":
-                close_group()
-                open_node("group", entry.get("heading"))
-                group_open = True
-            elif entry_type == "subgroup_header":
-                close_subgroup()
-                open_node("subgroup", entry.get("heading"))
-                subgroup_open = True
+            entry_type = str(entry.get("type") or "")
+            header_level = hierarchy_entry_level(section_id, entry)
+            if entry_type in WORKFLOW_HEADER_LEVELS and header_level is not None:
+                close_to_level(header_level)
+                open_node(header_level, entry.get("heading"), entry_index)
             elif entry_type == "content":
                 close_table()
                 html.append(self.render_content_card(entry.get("value")))
@@ -959,11 +1073,8 @@ class DocumentRenderer:
             else:
                 close_table()
                 html.append(self.render_content_card(entry))
-        if group_open:
-            close_group()
-        else:
-            close_subgroup()
         close_table()
+        close_to_level(1)
         html.append("</div>")
         return "".join(html)
 
@@ -1009,7 +1120,7 @@ class DocumentRenderer:
             return '<div class="generic-list">' + "".join(self.render_generic_value(item) for item in value) + "</div>"
         return self.render_rich_text(value)
 
-    def render_section_payload(self, section_id: str, payload: Any) -> str:
+    def render_section_payload(self, section_id: str, payload: Any, result_index: int) -> str:
         section_meta = section_display(section_id)
         fallback_heading = section_meta["label"]
         if isinstance(payload, list):
@@ -1030,11 +1141,11 @@ class DocumentRenderer:
         entries = payload.get("entries")
         rows = payload.get("rows")
         columns = payload.get("columns")
-        has_hierarchy_entries = isinstance(entries, list) and section_id in {"SEC11", "SEC12", "SEC13"}
-        if isinstance(entries, list) and any(isinstance(item, dict) and item.get("type") in {"group_header", "subgroup_header", "step"} for item in entries):
-            body = self.render_workflow_entries(payload)
+        has_hierarchy_entries = isinstance(entries, list) and section_id in {"SEC11", "SEC12", "SEC13", "SEC18"}
+        if isinstance(entries, list) and any(isinstance(item, dict) and item.get("type") in {"group_header", "subgroup_header", "sub_subgroup_header", "subsubgroup_header", "step"} for item in entries):
+            body = self.render_workflow_entries(section_id, payload, result_index)
         elif isinstance(entries, list):
-            body = self.render_hierarchy_entries(entries)
+            body = self.render_hierarchy_entries(section_id, entries, result_index)
         elif rows is not None and columns:
             body = self.render_matrix_table(payload)
         elif rows is not None:
@@ -1335,7 +1446,7 @@ class DocumentRenderer:
             '</header>',
         ]
         rendered_count = 0
-        for result in results:
+        for result_index, result in enumerate(results):
             if not isinstance(result, dict) or result.get("status") != "resolved":
                 continue
             section_id = str(result.get("section_id") or "")
@@ -1348,7 +1459,7 @@ class DocumentRenderer:
                     continue
                 result["section_json"] = fallback
                 section_json = fallback
-            html = self.render_section_payload(section_id, section_json)
+            html = self.render_section_payload(section_id, section_json, result_index)
             if html:
                 pieces.append(html)
                 rendered_count += 1
@@ -1494,6 +1605,119 @@ def build_renderer(job: UiJob) -> DocumentRenderer:
         asset_map=asset_map,
         inspection_payload=job.inspection_payload,
     )
+
+
+def apply_hierarchy_shift_to_payload(
+    section_json_payload: dict[str, Any],
+    *,
+    result_index: int,
+    entry_index: int,
+    direction: str,
+) -> tuple[dict[str, Any], bool]:
+    results = section_json_payload.get("results")
+    if not isinstance(results, list):
+        raise PipelineError("Final document results are not available.")
+    if result_index < 0 or result_index >= len(results):
+        raise PipelineError("The selected section could not be found.")
+
+    target_result = results[result_index]
+    if not isinstance(target_result, dict) or target_result.get("status") != "resolved":
+        raise PipelineError("The selected section is not editable.")
+
+    section_id = str(target_result.get("section_id") or "")
+    section_json = target_result.get("section_json")
+    if not isinstance(section_json, dict) or section_json.get("status") == "not_found":
+        raise PipelineError("This section does not contain editable hierarchy entries.")
+
+    entries = section_json.get("entries")
+    if not isinstance(entries, list):
+        raise PipelineError("This section does not contain editable hierarchy entries.")
+
+    updated_entries, changed = shift_hierarchy_entries(section_id, entries, entry_index, direction)
+    if not changed:
+        return section_json_payload, False
+
+    updated_section_json = dict(section_json)
+    updated_section_json["entries"] = updated_entries
+
+    updated_result = dict(target_result)
+    updated_result["section_json"] = updated_section_json
+
+    updated_results = list(results)
+    updated_results[result_index] = updated_result
+
+    updated_payload = dict(section_json_payload)
+    updated_payload["results"] = updated_results
+    summary = dict(updated_payload.get("summary") or {})
+    summary["manual_hierarchy_edit_timestamp_utc"] = utc_timestamp()
+    summary["manual_hierarchy_edit_count"] = int(summary.get("manual_hierarchy_edit_count") or 0) + 1
+    updated_payload["summary"] = summary
+    return updated_payload, True
+
+
+def parse_hierarchy_shift_request(payload: dict[str, Any]) -> tuple[int, int, str]:
+    try:
+        result_index = int(payload.get("result_index"))
+        entry_index = int(payload.get("entry_index"))
+    except (TypeError, ValueError) as exc:
+        raise PipelineError("Hierarchy edit payload is invalid.") from exc
+    direction = str(payload.get("direction") or "").strip().lower()
+    if direction not in {"left", "right"}:
+        raise PipelineError("Hierarchy direction must be left or right.")
+    return result_index, entry_index, direction
+
+
+def persist_job_section_json(job: UiJob, section_json_payload: dict[str, Any]) -> None:
+    renderer = build_renderer(job)
+    final_html = renderer.render_final_document(section_json_payload, job.display_name)
+    if job.section_json_output_path is not None:
+        classification.write_json(job.section_json_output_path, section_json_payload)
+    with job.lock:
+        job.section_json_payload = section_json_payload
+        job.final_html = final_html
+        job.touch()
+
+
+def sync_jobs_for_document(document_path: Path, section_json_payload: dict[str, Any]) -> None:
+    resolved_document_path = document_path.resolve()
+    with _jobs_lock:
+        matching_jobs = [job for job in _jobs.values() if job.document_path.resolve() == resolved_document_path]
+    for job in matching_jobs:
+        persist_job_section_json(job, section_json_payload)
+
+
+def build_history_renderer(doc_path: Path, doc_id: str) -> DocumentRenderer:
+    artifact_dir = history_artifact_dir(doc_path)
+    if artifact_dir is None:
+        raise FileNotFoundError("Chunk artifacts not found.")
+    table_map = load_json_file(artifact_dir / chunking.DEFAULT_TABLE_MAP_NAME)
+    cell_map = load_json_file(artifact_dir / chunking.DEFAULT_CELL_MAP_NAME)
+    asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
+    asset_map = load_json_file(asset_map_path) if asset_map_path.exists() else {}
+
+    inspection_payload: dict[str, Any] = {}
+    inspection_path = doc_path / DEFAULT_INSPECTION_OUTPUT_NAME
+    if inspection_path.exists():
+        try:
+            inspection_payload = json.loads(inspection_path.read_text(encoding="utf-8"))
+        except Exception:
+            inspection_payload = {}
+
+    return DocumentRenderer(
+        job_id=doc_id,
+        document_path=doc_path,
+        artifact_dir=artifact_dir,
+        table_map=table_map,
+        cell_map=cell_map,
+        asset_map=asset_map,
+        inspection_payload=inspection_payload,
+        asset_url_prefix=f"/api/history/{doc_id}/asset",
+    )
+
+
+def render_history_final_html(doc_path: Path, doc_id: str, section_json_payload: dict[str, Any]) -> str:
+    renderer = build_history_renderer(doc_path, doc_id)
+    return renderer.render_final_document(section_json_payload, doc_path.name)
 
 
 def export_job_rag_txt(job: UiJob) -> dict[str, Any]:
@@ -1888,6 +2112,32 @@ def api_final() -> Response:
     return jsonify({"html": job.final_html})
 
 
+@app.post("/api/final/hierarchy")
+def api_final_hierarchy() -> Response:
+    with _jobs_lock:
+        job = _jobs.get(_active_job_id or "")
+    if job is None or job.section_json_payload is None:
+        return jsonify({"error": "The final document is not ready yet."}), 404
+
+    request_payload = request.get_json(silent=True) or {}
+    try:
+        result_index, entry_index, direction = parse_hierarchy_shift_request(request_payload)
+        section_json_payload, changed = apply_hierarchy_shift_to_payload(
+            job.section_json_payload,
+            result_index=result_index,
+            entry_index=entry_index,
+            direction=direction,
+        )
+        if changed:
+            persist_job_section_json(job, section_json_payload)
+    except PipelineError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except (IndexError, ValueError) as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+
+    return jsonify({"ok": True, "changed": changed, "html": job.final_html or ""})
+
+
 @app.get("/api/download")
 def api_download() -> Response:
     with _jobs_lock:
@@ -2168,39 +2418,52 @@ def api_history_final(doc_id: str) -> Response:
     if not section_json_path.exists():
         return jsonify({"error": "Final document JSON not found."}), 404
 
-    artifact_dir = history_artifact_dir(doc_path)
-    if artifact_dir is None:
-        return jsonify({"error": "Chunk artifacts not found."}), 404
-
     try:
         section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
-        table_map = load_json_file(artifact_dir / chunking.DEFAULT_TABLE_MAP_NAME)
-        cell_map = load_json_file(artifact_dir / chunking.DEFAULT_CELL_MAP_NAME)
-        asset_map_path = artifact_dir / chunking.DEFAULT_ASSET_MAP_NAME
-        asset_map = load_json_file(asset_map_path) if asset_map_path.exists() else {}
     except Exception as exc:
         return jsonify({"error": f"Failed to load artifacts: {exc}"}), 500
 
-    inspection_payload: dict[str, Any] = {}
-    inspection_path = doc_path / DEFAULT_INSPECTION_OUTPUT_NAME
-    if inspection_path.exists():
-        try:
-            inspection_payload = json.loads(inspection_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    renderer = DocumentRenderer(
-        job_id=doc_id,
-        document_path=doc_path,
-        artifact_dir=artifact_dir,
-        table_map=table_map,
-        cell_map=cell_map,
-        asset_map=asset_map,
-        inspection_payload=inspection_payload,
-        asset_url_prefix=f"/api/history/{doc_id}/asset",
-    )
-    html = renderer.render_final_document(section_json_payload, doc_path.name)
+    try:
+        html = render_history_final_html(doc_path, doc_id, section_json_payload)
+    except FileNotFoundError:
+        return jsonify({"error": "Chunk artifacts not found."}), 404
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load artifacts: {exc}"}), 500
     return jsonify({"html": html})
+
+
+@app.post("/api/history/<doc_id>/final/hierarchy")
+def api_history_final_hierarchy(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
+    if not section_json_path.exists():
+        return jsonify({"error": "Final document JSON not found."}), 404
+
+    request_payload = request.get_json(silent=True) or {}
+    try:
+        section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
+        result_index, entry_index, direction = parse_hierarchy_shift_request(request_payload)
+        section_json_payload, changed = apply_hierarchy_shift_to_payload(
+            section_json_payload,
+            result_index=result_index,
+            entry_index=entry_index,
+            direction=direction,
+        )
+        if changed:
+            classification.write_json(section_json_path, section_json_payload)
+            sync_jobs_for_document(doc_path, section_json_payload)
+        html = render_history_final_html(doc_path, doc_id, section_json_payload)
+    except PipelineError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except FileNotFoundError:
+        return jsonify({"error": "Chunk artifacts not found."}), 404
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update hierarchy: {repair_text(exc)}"}), 500
+
+    return jsonify({"ok": True, "changed": changed, "html": html})
 
 
 @app.get("/api/history/<doc_id>/asset/<asset_id>")
