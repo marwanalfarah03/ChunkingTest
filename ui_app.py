@@ -652,20 +652,51 @@ class DocumentRenderer:
                         row_idx += 1
             return grid
 
+        def fill_merged_cells(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            """Propagate CL IDs into empty cells that the document's rowspan covers.
+
+            The LLM outputs "" for positions covered by a rowspan.  We use the
+            cell map's rowspan field to know exactly how many rows each CL ID
+            spans, then fill forward so compute_rowspans can detect the merge.
+            """
+            filled = [dict(step) for step in steps]
+            # carry[col_idx] = (cl_id, remaining_rows)
+            carry: dict[int, tuple[str, int]] = {}
+            for row_idx, step in enumerate(filled):
+                for col_idx, col in enumerate(columns):
+                    val = step.get(col)
+                    if val and isinstance(val, str) and CL_TOKEN_RE.match(val):
+                        rowspan = int((self.cell_map.get(val) or {}).get("rowspan") or 1)
+                        if rowspan > 1:
+                            carry[col_idx] = (val, rowspan - 1)
+                        else:
+                            carry.pop(col_idx, None)
+                    elif not val and col_idx in carry:
+                        cl_id, remaining = carry[col_idx]
+                        filled[row_idx][col] = cl_id
+                        if remaining > 1:
+                            carry[col_idx] = (cl_id, remaining - 1)
+                        else:
+                            del carry[col_idx]
+                    else:
+                        carry.pop(col_idx, None)
+            return filled
+
         def flush_steps() -> None:
             if not pending_steps:
                 return
-            grid = compute_rowspans(pending_steps)
-            for row_idx, step in enumerate(pending_steps):
+            steps = fill_merged_cells(pending_steps)
+            grid = compute_rowspans(steps)
+            for row_idx, step in enumerate(steps):
                 fallback_values = [v for k, v in step.items() if k != "type"]
                 html.append("<tr>")
                 for col_idx, col in enumerate(columns):
                     rs = grid[row_idx][col_idx]
                     if rs == 0:
                         continue
-                    value = step.get(col)
-                    if value is None and col_idx < len(fallback_values):
-                        value = fallback_values[col_idx]
+                    value = step.get(col)  # step is already from filled list
+                    if not value and col_idx < len(fallback_values):
+                        value = fallback_values[col_idx] or None
                     val_direction = dominant_direction(self.direction_source(value))
                     if col_idx == 0:
                         css_cls = "workflow-step"
