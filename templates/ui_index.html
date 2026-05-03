@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CBOJ SOP Document Builder</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='ui_styles.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('ui_styles.css') }}">
 </head>
 <body>
   <div class="app-shell">
@@ -110,6 +110,6 @@
       </section>
     </main>
   </div>
-  <script src="{{ url_for('static', filename='ui_app.js') }}"></script>
+  <script src="{{ static_asset_url('ui_app.js') }}"></script>
 </body>
 </html>

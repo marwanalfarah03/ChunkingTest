@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote as _url_quote
 
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_DIR = PROJECT_ROOT / "src"
@@ -54,6 +54,24 @@ app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
 _jobs: dict[str, "UiJob"] = {}
 _active_job_id: str | None = None
 _jobs_lock = threading.RLock()
+
+
+def static_asset_version(filename: str) -> int:
+    try:
+        return (PROJECT_ROOT / "static" / filename).stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@app.context_processor
+def template_helpers() -> dict[str, Any]:
+    return {
+        "static_asset_url": lambda filename: url_for(
+            "static",
+            filename=filename,
+            v=static_asset_version(filename),
+        )
+    }
 
 
 def utc_timestamp() -> str:

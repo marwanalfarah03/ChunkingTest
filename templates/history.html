@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>History — CBOJ SOP Builder</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='ui_styles.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='history_styles.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('ui_styles.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('history_styles.css') }}">
 </head>
 <body class="history-page">
   <div class="hist-shell">
@@ -123,6 +123,6 @@
     </main>
   </div>
 
-  <script src="{{ url_for('static', filename='history_app.js') }}"></script>
+  <script src="{{ static_asset_url('history_app.js') }}"></script>
 </body>
 </html>
