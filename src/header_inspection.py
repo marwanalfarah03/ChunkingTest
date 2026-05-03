@@ -44,7 +44,6 @@ NON_WORD_PATTERN = re.compile(r"[^\w\s]+", re.UNICODE)
 WHITESPACE_PATTERN = re.compile(r"\s+")
 PROMPT_ROW_LIMIT = 8
 INPUT_EXCERPT_LINE_LIMIT = 28
-HEADER_FIRST_COLUMN_MATCH_THRESHOLD = 0.72
 
 INSPECTION_SYSTEM_PROMPT = """
 You resolve column-header order for extracted SOP tables.
@@ -103,15 +102,6 @@ HEADER_SECTION_SCHEMAS: dict[str, SectionHeaderSchema] = {
     ),
 }
 
-HEADER_FIRST_COLUMN_HINTS: dict[str, tuple[str, ...]] = {
-    "SEC03": ("اسم الوثيقة", "document name", "document"),
-    "SEC04": ("الاعداد", "prepared by", "preparation", "preparer"),
-    "SEC05": ("رقم الاصدار", "version", "version number", "version no"),
-    "SEC12": ("الخطوات", "step", "steps", "workflow step", "workflow steps"),
-    "SEC13": ("الخطوات", "step", "steps", "control step", "control steps"),
-    "SEC15": ("الفئة", "category", "classification", "file category"),
-}
-
 
 def has_chunk_artifacts(directory: Path) -> bool:
     return directory.is_dir() and (directory / DEFAULT_TABLE_MAP_NAME).exists() and (directory / DEFAULT_CELL_MAP_NAME).exists()
@@ -149,20 +139,6 @@ def label_similarity(left: str, right: str) -> float:
     if normalized_left in normalized_right or normalized_right in normalized_left:
         return 0.9
     return SequenceMatcher(a=normalized_left, b=normalized_right).ratio()
-
-
-def first_column_matches_expected_header(
-    section_id: str,
-    value: str,
-    allowed_orders: list[tuple[str, ...]],
-) -> bool:
-    hints = [order[0] for order in allowed_orders if order]
-    hints.extend(HEADER_FIRST_COLUMN_HINTS.get(section_id, ()))
-    return any(
-        label_similarity(value, hint) >= HEADER_FIRST_COLUMN_MATCH_THRESHOLD
-        for hint in hints
-        if str(hint).strip()
-    )
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -248,6 +224,8 @@ def detect_actual_header_labels(
             continue
         cells = sorted(row["cells"], key=lambda c: (int(c["col"]), str(c["cell_id"])))
         if len(cells) != column_count:
+            continue
+        if not all(cell["displayed_in_chunk"] for cell in cells):
             continue
         labels = [cell["plain_text"].strip() for cell in cells]
         if all(labels):
@@ -802,8 +780,6 @@ def build_heuristic_resolution(
         max(len(o) for o in allowed_orders) if allowed_orders else logical_column_count(rows)
     )
     actual_labels, actual_cell_ids, actual_row_index = detect_actual_header_labels(rows, col_count)
-    if actual_labels and allowed_orders and not first_column_matches_expected_header(section_id, actual_labels[0], allowed_orders):
-        actual_labels, actual_cell_ids, actual_row_index = [], [], None
     if actual_labels:
         return {
             "status": "resolved",
