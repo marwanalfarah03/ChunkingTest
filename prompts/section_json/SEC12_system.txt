@@ -80,6 +80,7 @@ Rules:
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including bold tags, color codes, and original language.
 - Preserve exact document order of all entries.
+- Merged cells (rowspan): when a cell in the rendered table spans multiple rows (shown as an empty position below the first occurrence), output the same CL ID in every step entry that the merged cell covers — do NOT leave it blank or omit it. The UI uses repeated identical CL IDs in consecutive rows to detect and display merged cells.
 - Do NOT include content from SEC13 or other sections.
 - If the input spans multiple merged tables, treat them as one continuous section.
 - If additional free-form text appears in the input that belongs to this section but doesn't fit into any defined entry type, add it as `{"type": "content", "value": "..."}` at the appropriate position in `entries`.

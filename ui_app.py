@@ -627,10 +627,64 @@ class DocumentRenderer:
         table_open = False
         group_open = False
         subgroup_open = False
+        pending_steps: list[dict[str, Any]] = []
+
+        def compute_rowspans(steps: list[dict[str, Any]]) -> list[list[int]]:
+            # grid[row][col]: >1 = rowspan count, 0 = covered by cell above, 1 = normal
+            n = len(steps)
+            nc = len(columns)
+            grid = [[1] * nc for _ in range(n)]
+            for col_idx, col in enumerate(columns):
+                row_idx = 0
+                while row_idx < n:
+                    val = steps[row_idx].get(col)
+                    if val and isinstance(val, str) and CL_TOKEN_RE.match(val):
+                        span = 1
+                        while (row_idx + span < n
+                               and steps[row_idx + span].get(col) == val):
+                            span += 1
+                        if span > 1:
+                            grid[row_idx][col_idx] = span
+                            for k in range(1, span):
+                                grid[row_idx + k][col_idx] = 0
+                        row_idx += span
+                    else:
+                        row_idx += 1
+            return grid
+
+        def flush_steps() -> None:
+            if not pending_steps:
+                return
+            grid = compute_rowspans(pending_steps)
+            for row_idx, step in enumerate(pending_steps):
+                fallback_values = [v for k, v in step.items() if k != "type"]
+                html.append("<tr>")
+                for col_idx, col in enumerate(columns):
+                    rs = grid[row_idx][col_idx]
+                    if rs == 0:
+                        continue
+                    value = step.get(col)
+                    if value is None and col_idx < len(fallback_values):
+                        value = fallback_values[col_idx]
+                    val_direction = dominant_direction(self.direction_source(value))
+                    if col_idx == 0:
+                        css_cls = "workflow-step"
+                    elif col_idx == len(columns) - 1 and len(columns) == 2:
+                        css_cls = "workflow-owner"
+                    else:
+                        css_cls = "workflow-cell"
+                    rowspan_attr = f' rowspan="{rs}"' if rs > 1 else ""
+                    html.append(
+                        f'<td class="{css_cls} text-{val_direction}" dir="{val_direction}"{rowspan_attr}>'
+                        f'{self.render_rich_text(value)}</td>'
+                    )
+                html.append("</tr>")
+            pending_steps.clear()
 
         def close_table() -> None:
             nonlocal table_open
             if table_open:
+                flush_steps()
                 html.append("</tbody></table></div>")
                 table_open = False
 
@@ -700,24 +754,7 @@ class DocumentRenderer:
                 html.append(self.render_content_card(entry.get("value")))
             elif entry_type == "step":
                 open_table()
-                fallback_values = [value for key, value in entry.items() if key != "type"]
-                html.append("<tr>")
-                for col_idx, col in enumerate(columns):
-                    value = entry.get(col)
-                    if value is None and col_idx < len(fallback_values):
-                        value = fallback_values[col_idx]
-                    val_direction = dominant_direction(self.direction_source(value))
-                    if col_idx == 0:
-                        css_cls = "workflow-step"
-                    elif col_idx == len(columns) - 1 and len(columns) == 2:
-                        css_cls = "workflow-owner"
-                    else:
-                        css_cls = "workflow-cell"
-                    html.append(
-                        f'<td class="{css_cls} text-{val_direction}" dir="{val_direction}">'
-                        f'{self.render_rich_text(value)}</td>'
-                    )
-                html.append("</tr>")
+                pending_steps.append(entry)
             else:
                 close_table()
                 html.append(self.render_content_card(entry))
