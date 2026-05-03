@@ -39,9 +39,12 @@ INVISIBLE_TEXT_CHAR_PATTERN = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a
 ASSET_REFERENCE_PATTERN = re.compile(r"<(EM\d{6})>")
 TABLE_REFERENCE_PATTERN = re.compile(r"<TB\d{6}>")
 CELL_REFERENCE_PATTERN = re.compile(r"\bCL\d{6}\b")
-SPREADSHEET_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 SPREADSHEET_WORKBOOK_XML = "xl/workbook.xml"
-HIDDEN_WORKBOOK_VIEW_STATES = {"hidden", "veryhidden"}
+SPREADSHEET_WORKBOOK_VIEW_TAG_PATTERN = re.compile(rb"<(?:[A-Za-z_][\w.-]*:)?workbookView\b[^>]*>", re.IGNORECASE)
+SPREADSHEET_WORKBOOK_VIEW_VISIBILITY_PATTERN = re.compile(
+    rb"(\bvisibility\s*=\s*)([\"'])(hidden|veryhidden)([\"'])",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -666,21 +669,17 @@ def apply_extension_to_name(value: str, extension: str | None, fallback_stem: st
 
 
 def normalize_workbook_view_visibility(workbook_xml: bytes) -> bytes:
-    try:
-        root = ET.fromstring(workbook_xml)
-    except ET.ParseError:
-        return workbook_xml
+    def normalize_tag(match: re.Match[bytes]) -> bytes:
+        tag = match.group(0)
 
-    changed = False
-    for workbook_view in root.findall(f".//{{{SPREADSHEET_MAIN_NS}}}workbookView"):
-        visibility = str(workbook_view.get("visibility") or "").lower()
-        if visibility in HIDDEN_WORKBOOK_VIEW_STATES:
-            workbook_view.set("visibility", "visible")
-            changed = True
+        def normalize_visibility(visibility_match: re.Match[bytes]) -> bytes:
+            if visibility_match.group(2) != visibility_match.group(4):
+                return visibility_match.group(0)
+            return visibility_match.group(1) + visibility_match.group(2) + b"visible" + visibility_match.group(4)
 
-    if not changed:
-        return workbook_xml
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        return SPREADSHEET_WORKBOOK_VIEW_VISIBILITY_PATTERN.sub(normalize_visibility, tag)
+
+    return SPREADSHEET_WORKBOOK_VIEW_TAG_PATTERN.sub(normalize_tag, workbook_xml)
 
 
 def normalize_spreadsheet_workbook_visibility(raw_bytes: bytes) -> bytes:
