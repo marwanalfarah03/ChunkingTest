@@ -5,6 +5,7 @@ import json
 import io
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -1903,6 +1904,47 @@ def history_page() -> str:
 @app.get("/api/history")
 def api_history_list() -> Response:
     return jsonify(list_history_documents())
+
+
+@app.delete("/api/history/<doc_id>")
+def api_history_delete(doc_id: str) -> Response:
+    global _active_job_id
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    documents_root = DOCUMENTS_ROOT.resolve()
+    resolved_doc_path = doc_path.resolve()
+    try:
+        resolved_doc_path.relative_to(documents_root)
+    except ValueError:
+        return jsonify({"error": "Document path is invalid."}), 400
+    if resolved_doc_path == documents_root:
+        return jsonify({"error": "Document path is invalid."}), 400
+
+    with _jobs_lock:
+        for job in _jobs.values():
+            if job.document_path.resolve() == resolved_doc_path and job.status in {"queued", "running", "awaiting_review"}:
+                return jsonify({"error": "Cannot delete a document while it is being processed."}), 409
+
+    try:
+        shutil.rmtree(resolved_doc_path)
+    except FileNotFoundError:
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"error": f"Failed to delete document: {exc}"}), 500
+
+    with _jobs_lock:
+        deleted_job_ids = [
+            job_id for job_id, job in _jobs.items()
+            if job.document_path.resolve() == resolved_doc_path
+        ]
+        for job_id in deleted_job_ids:
+            _jobs.pop(job_id, None)
+        if _active_job_id in deleted_job_ids:
+            _active_job_id = None
+
+    return jsonify({"ok": True})
 
 
 @app.get("/api/history/<doc_id>")

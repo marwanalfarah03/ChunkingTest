@@ -20,9 +20,18 @@ function formatDate(value, mode = 'date') {
   if (mode === 'datetime') return date.toLocaleString('en-GB');
   return date.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
 }
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    let message = `Request failed: ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload?.error) message = payload.error;
+    } catch (err) {
+      // Keep the status-based fallback when the response body is not JSON.
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -138,6 +147,7 @@ async function selectDoc(docId) {
     ${doc.has_inspection     ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/inspection">&#8659; Inspection</a>` : ''}
     ${doc.has_section_json   ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/section_json">&#8659; Section JSON</a>` : ''}
     ${doc.has_section_json   ? `<a class="secondary-button hist-dl-btn" href="/api/history/${encodeURIComponent(docId)}/download/rag-txt">&#8659; RAG TXT</a>` : ''}
+    <button class="secondary-button hist-dl-btn hist-delete-btn" type="button" data-delete-doc>Delete</button>
   `;
 
   // Reset to Final tab
@@ -146,6 +156,36 @@ async function selectDoc(docId) {
 
   loadFinal();
 }
+
+// Delete action
+detailDownloads.addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-delete-doc]');
+  if (!button) return;
+  const docId = state.activeDocId;
+  const doc = state.docs.find((d) => d.id === docId) || { name: 'this document' };
+  if (!docId) return;
+  const confirmed = window.confirm(`Delete "${doc.name}" from history? This removes the processed document folder and generated artifacts.`);
+  if (!confirmed) return;
+
+  button.disabled = true;
+  button.textContent = 'Deleting...';
+  try {
+    await fetchJson(`/api/history/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+    state.activeDocId = null;
+    state.loadedChunks = null;
+    state.loadedLogs = null;
+    state.loadedJsons = null;
+    state.allLogs = [];
+    show(histDetail, false);
+    show(histWelcome, true);
+    finalOutputContainer.innerHTML = '';
+    await loadDocList();
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = 'Delete';
+    window.alert(err.message || 'Delete failed.');
+  }
+});
 
 // ── Final output ───────────────────────────────────────────────────────────
 async function loadFinal() {

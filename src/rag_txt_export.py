@@ -1027,9 +1027,12 @@ def export_rag_txt_files(
         if not isinstance(result, dict) or result.get("status") != "resolved":
             continue
         section_id = str(result.get("section_id") or "")
+        section_json = result.get("section_json")
+        section_json_id = section_json.get("section_id") if isinstance(section_json, dict) else None
+        if section_id == "SEC02" or section_json_id == "SEC02":
+            continue
         if include_sections is not None and section_id not in include_sections:
             continue
-        section_json = result.get("section_json")
         if isinstance(section_json, dict) and section_json.get("status") == "not_found":
             continue
         if not isinstance(section_json, dict):

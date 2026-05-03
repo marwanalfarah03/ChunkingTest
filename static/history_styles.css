@@ -231,6 +231,17 @@ body.history-page .final-doc-header p {
   justify-content: flex-end;
 }
 .hist-dl-btn { font-size: 13px; padding: 9px 14px; border-radius: 12px; text-decoration: none; }
+.hist-delete-btn {
+  color: var(--cbo-burgundy);
+  border-color: rgba(111,38,61,.24);
+}
+.hist-delete-btn:hover {
+  background: rgba(111,38,61,.08);
+}
+.hist-delete-btn:disabled {
+  opacity: .62;
+  cursor: wait;
+}
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
 .hist-tabs {
