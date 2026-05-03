@@ -221,7 +221,16 @@ def interactive_review(classification_payload: dict[str, Any]) -> dict[str, Any]
     """
     _ensure_utf8_stdout()
 
-    results: list[dict[str, Any]] = list(classification_payload.get("results") or [])
+    all_results: list[dict[str, Any]] = list(classification_payload.get("results") or [])
+
+    # Auto-annotate skipped chunks and exclude them from interactive review
+    for r in all_results:
+        if r.get("skipped"):
+            r.setdefault("llm_predicted_sections", list(r.get("predicted_sections") or []))
+            r["review_action"] = "skipped"
+
+    results = [r for r in all_results if not r.get("skipped")]
+
     if not results:
         print("  No classification results to review.", file=sys.stderr)
         return classification_payload
@@ -316,7 +325,7 @@ def interactive_review(classification_payload: dict[str, Any]) -> dict[str, Any]
 
         print("  Unrecognized command. Type '?' for help.")
 
-    # Annotate each result with its review action
+    # Annotate each reviewable result with its review action
     for i, r in enumerate(results):
         r["review_action"] = "modified" if i in modified_indices else "confirmed"
 
@@ -330,9 +339,9 @@ def interactive_review(classification_payload: dict[str, Any]) -> dict[str, Any]
     else:
         print(f"\n  Review exited -- changes discarded, original classifications used.")
 
-    # Build the annotated payload
+    # Build the annotated payload — include all results (skipped ones already annotated above)
     updated_payload = dict(classification_payload)
-    updated_payload["results"] = results
+    updated_payload["results"] = all_results
     summary = dict((classification_payload.get("summary") or {}))
     summary["human_reviewed"] = confirmed
     summary["review_timestamp_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

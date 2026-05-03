@@ -1750,6 +1750,8 @@ def build_review_items(job: UiJob, classification_payload: dict[str, Any]) -> li
     for index, result in enumerate(results):
         if not isinstance(result, dict):
             continue
+        if result.get("skipped"):
+            continue
         sections = [str(section_id) for section_id in result.get("predicted_sections") or []]
         item_html = renderer.render_chunk(str(result.get("txt_file_name") or ""), str(result.get("relative_path") or ""))
         items.append({
@@ -1845,11 +1847,17 @@ def apply_review_updates(job: UiJob) -> dict[str, Any]:
         raise PipelineError("Classification results are not ready for review.")
     updates = job.review_updates or []
     results = list(job.classification_payload.get("results") or [])
-    if len(updates) != len(results):
+    reviewable_count = sum(1 for r in results if isinstance(r, dict) and not r.get("skipped"))
+    if len(updates) != reviewable_count:
         raise PipelineError("Every extracted part must be reviewed before continuing.")
     modified_count = 0
     updates_by_index = {int(item["index"]): item for item in updates}
     for index, result in enumerate(results):
+        if not isinstance(result, dict):
+            continue
+        if result.get("skipped"):
+            result["review_action"] = "skipped"
+            continue
         update = updates_by_index.get(index)
         if update is None or not update.get("approved"):
             raise PipelineError("Every extracted part must be approved before continuing.")
@@ -2387,6 +2395,8 @@ def api_history_chunks(doc_id: str) -> Response:
     chunks = []
     for chunk_path in chunk_paths:
         result = results_by_name.get(chunk_path.name, {})
+        if result.get("skipped"):
+            continue
         sections = [str(s) for s in result.get("predicted_sections") or []]
         html = renderer.render_chunk(
             chunk_path.name,
