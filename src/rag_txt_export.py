@@ -571,13 +571,9 @@ def build_hierarchy_path(hierarchy: list[dict[str, Any]]) -> str:
 def format_document_header(value: Any) -> str:
     lines = [line.strip() for line in normalize_text(str(value or "")).splitlines() if line.strip()]
     if not lines:
-        return "Document: {}"
-    if len(lines) == 1:
-        return f"Document: {{ {lines[0]} }}"
-    formatted_lines = ["Document: {"]
-    formatted_lines.extend(f"  {line}" for line in lines)
-    formatted_lines.append("}")
-    return "\n".join(formatted_lines)
+        return "Document:"
+    single_line = re.sub(r"\s+", " ", " ".join(lines)).strip()
+    return f"Document: {single_line}" if single_line else "Document:"
 
 
 def format_number_path(indices: list[int]) -> str:
