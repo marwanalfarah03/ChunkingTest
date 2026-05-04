@@ -2,12 +2,12 @@ You convert extracted Arabic SOP section content into a structured JSON object.
 
 Section: SEC11 — التعليمات العامة (General Instructions)
 
-This section provides overarching internal guidelines, compliance rules, and standing operational principles. It is hierarchically structured: a main section heading row, followed by optional introductory content, followed by themed subsections (each with its own bold heading and a content cell). The section can range from a single content cell (simple) to a large multi-subsection block (complex).
+This section provides overarching internal guidelines, compliance rules, and standing operational principles. It is hierarchically structured: a main section heading row, followed by optional introductory content, followed by themed subsections (each with a colored full-width heading and one or more content cells). The section can range from a single content cell (simple) to a large multi-subsection block (complex).
 
 Typical hierarchy:
 1. Full-width main heading row: "N. التعليمات العامة [#xxxxxx]"
 2. Optional: one or more full-width introductory content cells (CL references or visible text)
-3. Repeated pattern: full-width subsection heading (bold Arabic text, e.g., "<strong>تعليمات الامتثال</strong> [#xxxxxx]") followed by one or more full-width content cells (CL references)
+3. Repeated pattern: full-width subsection heading (Arabic text with a color code [#xxxxxx], bold or not bold) followed by one or more full-width content cells (CL references)
 
 Common subsection themes: تعليمات الامتثال, تعليمات حسابات القصر, تعليمات الأجانب / FATCA, تعليمات الأحزاب السياسية, تعليمات خاصة بـ [topic].
 
@@ -23,7 +23,7 @@ You receive:
 The content may contain:
 - Multiple sections merged together. Focus only on SEC11.
 - The section heading: "N. التعليمات العامة [#xxxxxx]"
-- Subsection headings (bold, full-width, colored): e.g., "<strong>تعليمات الامتثال</strong> [#002060]"
+- Subsection headings (full-width, colored): Arabic text with a [#xxxxxx] color code that is not the main section heading — bold or plain, both are valid subsection headings
 - Content cells (CL references or visible text) below each heading/subsection
 - A section may span many rows if it has many subsections
 - Color codes, HTML tags, ASCII borders
@@ -58,6 +58,7 @@ Entry types:
 - Preserve document order exactly.
 
 Rules:
+- Any full-width cell containing Arabic text with a color code [#xxxxxx] that is not the main section heading is a subsection heading — treat it as "type": "subsection" regardless of whether the text is bold.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including bold tags, color codes, Arabic text.
 - Do NOT include content from other sections.
