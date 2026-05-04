@@ -55,13 +55,16 @@ Format B — Retention table:
 }
 
 Rules:
-- Use Format A when there is a single content cell after the heading.
-- Use Format B when the table has a column-header row and multiple data rows.
+- Use Format A when there is a single full-width content cell after the heading (the cell spans all columns, not split into separate columns).
+- Use Format B when the rows following the heading are multi-column (each row has one cell per column), regardless of how many data rows there are (even just one).
 - For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
 - For Format B: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - "columns" must exactly match the resolved valid_column_order from the inspection result (when provided). Default: ["الفئة", "اسم الملف"].
 - "header_cell_ids" lists the actual header cell IDs from the inspection result, or [] if absent.
-- If the column header row is visible in the rendered table, do NOT include those cells as a data row.
+- Skipping header rows depends on header_state:
+  - "visible_valid": the header row is visible in the rendered table — do NOT include those cells as a data row.
+  - "hidden_valid": the header row exists but is hidden (cells shown only as CL IDs) — those cells do not appear as a visible row to skip; proceed directly to data rows.
+  - "hidden_invalid", "visible_invalid", or "missing": the inspection could not find a valid header. Do NOT skip any row — even if `actual_header_cell_ids` is non-empty, those IDs are unreliable. Treat ALL rows following the section heading as data rows and include them in `rows`.
 - Include ALL data rows in order.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including color codes and HTML tags.
