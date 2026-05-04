@@ -371,7 +371,9 @@ def extract_display_color(value: Any) -> tuple[str, str | None]:
     matches = COLOR_TOKEN_RE.findall(fixed)
     color = f"#{matches[-1]}" if matches else None
     label = COLOR_TOKEN_RE.sub(" ", fixed)
-    return re.sub(r"\s+", " ", label).strip(), color
+    label = re.sub(r"[ \t]+", " ", label)
+    label = re.sub(r"\n{3,}", "\n\n", label)
+    return label.strip(), color
 
 
 def section_display(section_id: str) -> dict[str, str]:
