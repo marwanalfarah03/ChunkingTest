@@ -35,6 +35,7 @@ The content may contain:
 - For Format B: a column-header row followed by multiple definition rows.
 - For Format C: repeated heading + content block pairs, possibly from multiple merged source tables.
 - Color codes, HTML tags, ASCII borders.
+- Plain text that appears outside the ASCII table borders (i.e., not inside `| ... |` cell delimiters), either before or after the table rows. This text is part of the section content and must NOT be dropped. Include it as if it were an additional content item.
 
 ---
 OUTPUT FORMAT
@@ -88,7 +89,7 @@ Rules:
 - Use Format C when there are multiple named sub-blocks (each with its own heading), regardless of how many source tables they came from.
 - For Format C, set `section_heading` to the canonical SEC18 section label `التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)`; do NOT copy one of the subsection headings into `section_heading`.
 - Recognize SEC18 headings in any language — do NOT return not_found just because the heading is in English or uses a different phrasing.
-- For Format A: if additional text appears after the main content cell that belongs to this section (not from another section), append it to `content` separated by `\n`.
+- For Format A: if additional text appears after the main content cell that belongs to this section — whether inside a table cell or as raw plain text outside the table borders — append it to `content` separated by `\n`.
 - For Format B: "columns" lists column labels (visible text or CL IDs if hidden); "header_cell_ids" lists the actual header cell IDs if present, otherwise [].
 - For Format B: if additional text appears that doesn't fit into a table row, include it in an optional top-level `"additional_text"` field (multiple pieces joined with `\n`).
 - If a column header is a CL ID, use that CL ID as the key in each row — do NOT repeat it as a value.
