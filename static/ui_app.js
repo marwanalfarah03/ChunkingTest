@@ -164,8 +164,11 @@ function renderReview() {
   }
 }
 
-function collectCardSections(card) {
-  return [...card.querySelectorAll('[data-section-option]:checked')].map((input) => input.dataset.sectionOption);
+function syncSectionLabels(item) {
+  item.section_labels = (item.sections || []).map((sectionId) => {
+    const option = state.sectionOptions.find((candidate) => candidate.id === sectionId);
+    return option ? option.label : sectionId;
+  });
 }
 
 reviewList.addEventListener('click', (event) => {
@@ -175,17 +178,11 @@ reviewList.addEventListener('click', (event) => {
   const index = Number(card.dataset.reviewIndex);
   const item = state.reviewItems.find((candidate) => candidate.index === index);
   if (!item) return;
-  const sections = collectCardSections(card);
-  if (!sections.length) {
+  if (!(item.sections || []).length) {
     button.textContent = 'Choose an area first';
     setTimeout(() => renderReview(), 900);
     return;
   }
-  item.sections = sections;
-  item.section_labels = sections.map((sectionId) => {
-    const option = state.sectionOptions.find((candidate) => candidate.id === sectionId);
-    return option ? option.label : sectionId;
-  });
   item.approved = !item.approved;
   renderReview();
 });
@@ -196,11 +193,15 @@ reviewList.addEventListener('change', (event) => {
   const index = Number(card.dataset.reviewIndex);
   const item = state.reviewItems.find((candidate) => candidate.index === index);
   if (!item) return;
-  item.sections = collectCardSections(card);
-  item.section_labels = item.sections.map((sectionId) => {
-    const option = state.sectionOptions.find((candidate) => candidate.id === sectionId);
-    return option ? option.label : sectionId;
-  });
+  const sectionId = event.target.dataset.sectionOption;
+  if (event.target.checked) {
+    if (!(item.sections || []).includes(sectionId)) {
+      item.sections = [...(item.sections || []), sectionId];
+    }
+  } else {
+    item.sections = (item.sections || []).filter((id) => id !== sectionId);
+  }
+  syncSectionLabels(item);
   item.approved = false;
   renderReview();
 });
