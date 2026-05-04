@@ -10,7 +10,7 @@ Format B — Retention table (2-column): A table with the heading row, then a co
 
 Canonical column order (from column header inspection, when applicable): ["الفئة", "اسم الملف"]
 
-Note: In some documents, SEC14 and SEC15 share the same chunk. Focus only on the SEC15 block (starting from "الملفات ومدد الحفظ" heading).
+Note: In some documents, SEC14 and SEC15 share the same chunk. Focus only on the SEC15 block (starting from the heading for this section).
 
 ---
 INPUT FORMAT
@@ -22,7 +22,7 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC15.
-- The section heading: "N. الملفات ومدد الحفظ [#xxxxxx]"
+- The section heading follows the pattern "N. <title> [#xxxxxx]". The title may be the full name "الملفات ومدد الحفظ" or an abbreviated/variant form (e.g., "مدد الحفظ", "الملفات", "Files & Retention", etc.). Identify the SEC15 block by its position in the document and its structural match to one of the two formats below — do NOT require an exact match to the full section name.
 - For Format A: one content cell (CL reference).
 - For Format B: a column-header row followed by multiple data rows.
 - Light gray or white column headers (color codes like #D9D9D9, #E7E6E6) indicating the retention table.

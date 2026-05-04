@@ -23,8 +23,9 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC13.
-- SEC13 begins at the section heading row and ends when the next canonical section heading appears or the table ends.
-- Full-width rows: section heading, control sub-headings.
+- SEC13 begins at the first full-width numbered heading row that corresponds to this section (e.g., "N. الإجراءات الرقابية [#xxxxxx]") and ends immediately before the next full-width numbered heading row of any other section, or at the end of the table, whichever comes first.
+- A full-width numbered heading row has the pattern "N. <title> [#xxxxxx]" (a number, a period, Arabic or English title text, and a bracketed reference). Any such row that appears after the SEC13 opening heading is a boundary to a different section — do NOT emit it or anything after it.
+- Full-width rows within SEC13: section heading, control sub-headings (which do NOT have the numbered + bracketed-reference pattern).
 - Step rows: one cell per column (control step, responsible party, etc.).
 - Color codes, HTML tags, ASCII borders.
 - A full-width cell may contain multiple lines of text, all between the same pair of horizontal `+---+` borders. Those lines belong to one cell — join them with `\n` and use the result as the single `heading` value. Do not emit separate entries for individual lines within the same cell.
