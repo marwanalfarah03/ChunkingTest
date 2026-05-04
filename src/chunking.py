@@ -1647,7 +1647,29 @@ def build_asset_map(
     return asset_map
 
 
-def build_export_artifacts(docx_path: Path, asset_output_dir: Path, asset_relative_dir: str) -> ExportArtifacts:
+def find_outer_cell(body: ET.Element) -> ET.Element | None:
+    """Return the first content cell of the first table in body.
+
+    Used when the entire document content is wrapped in a single outer table
+    cell.  The caller can then iterate over that cell's children instead of
+    the body's children, effectively promoting the cell content to body level.
+    """
+    for child in list(body):
+        if child.tag != qn("w:tbl"):
+            continue
+        for row in child.findall("./w:tr", NS):
+            for cell in row.findall("./w:tc", NS):
+                return cell
+    return None
+
+
+def build_export_artifacts(
+    docx_path: Path,
+    asset_output_dir: Path,
+    asset_relative_dir: str,
+    *,
+    unwrap_outer_cell: bool = False,
+) -> ExportArtifacts:
     with zipfile.ZipFile(docx_path) as archive:
         document_root = read_archive_xml(archive, "word/document.xml")
         theme_colors = read_theme_colors(docx_path)
@@ -1677,7 +1699,14 @@ def build_export_artifacts(docx_path: Path, asset_output_dir: Path, asset_relati
         all_table_entries: list[TableEntry] = []
         table_grids: OrderedDict[str, TableGrid] = OrderedDict()
 
-        for body_index, child in enumerate(list(body), start=1):
+        body_children: list[ET.Element]
+        if unwrap_outer_cell:
+            outer_cell = find_outer_cell(body)
+            body_children = list(outer_cell) if outer_cell is not None else list(body)
+        else:
+            body_children = list(body)
+
+        for body_index, child in enumerate(body_children, start=1):
             if child.tag == qn("w:p"):
                 text = paragraph_text(child, numbering_context, asset_context)
                 if not text:
@@ -1812,10 +1841,21 @@ def parse_args() -> argparse.Namespace:
         action="append",
         help="Document directory name under documents/. Defaults to all documents.",
     )
+    parser.add_argument(
+        "--unwrap-outer-cell",
+        action="store_true",
+        default=False,
+        help="Treat the document as having all content inside a single outer table cell and promote that cell's contents to body level before chunking.",
+    )
     return parser.parse_args()
 
 
-def export_document(document: DocumentPaths, reporter: ReportFn | None = None) -> dict[str, object]:
+def export_document(
+    document: DocumentPaths,
+    reporter: ReportFn | None = None,
+    *,
+    unwrap_outer_cell: bool = False,
+) -> dict[str, object]:
     docx_path = document.source_docx.expanduser().resolve()
     output_dir = document.chunks_dir.expanduser().resolve()
     if not docx_path.exists():
@@ -1826,7 +1866,7 @@ def export_document(document: DocumentPaths, reporter: ReportFn | None = None) -
     output_dir.mkdir(parents=True, exist_ok=True)
     table_map_path, cell_map_path, asset_map_path, asset_dir_path = derive_artifact_paths(output_dir)
 
-    artifacts = build_export_artifacts(docx_path, asset_dir_path, asset_dir_path.name)
+    artifacts = build_export_artifacts(docx_path, asset_dir_path, asset_dir_path.name, unwrap_outer_cell=unwrap_outer_cell)
     chunk_paths = write_chunks(output_dir, artifacts.chunks)
     for chunk, path in zip(artifacts.chunks, chunk_paths):
         if chunk.table_id is None:
@@ -1874,7 +1914,7 @@ def main() -> None:
 
         output_dir.mkdir(parents=True, exist_ok=True)
         table_map_path, cell_map_path, asset_map_path, asset_dir_path = derive_artifact_paths(output_dir)
-        artifacts = build_export_artifacts(docx_path, asset_dir_path, asset_dir_path.name)
+        artifacts = build_export_artifacts(docx_path, asset_dir_path, asset_dir_path.name, unwrap_outer_cell=args.unwrap_outer_cell)
         chunk_paths = write_chunks(output_dir, artifacts.chunks)
         for chunk, path in zip(artifacts.chunks, chunk_paths):
             if chunk.table_id is None:
@@ -1903,7 +1943,7 @@ def main() -> None:
 
     for document in documents:
         print(f"\n=== Document: {document.name} ===")
-        export_document(document)
+        export_document(document, unwrap_outer_cell=args.unwrap_outer_cell)
 
 
 if __name__ == "__main__":

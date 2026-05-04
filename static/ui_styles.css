@@ -207,6 +207,8 @@ button { cursor: pointer; }
 }
 .settings-panel summary { font-weight: 850; color: var(--cbo-blue); }
 .settings-panel label { display: grid; gap: 6px; margin-top: 12px; color: rgba(24,38,50,.7); font-size: 13px; font-weight: 800; }
+.settings-checkbox { display: flex; flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.settings-checkbox input[type="checkbox"] { width: auto; border: none; padding: 0; background: none; cursor: pointer; }
 .settings-panel input {
   width: 100%;
   border: 1px solid var(--line);

@@ -43,7 +43,7 @@
             <small>Tables, nested tables, colors, and embedded files will be preserved for review.</small>
           </label>
           <details class="settings-panel">
-            <summary>Connection settings</summary>
+            <summary>Settings</summary>
             <label>AI server address
               <input name="base_url" value="{{ default_base_url }}" autocomplete="off">
             </label>
@@ -52,6 +52,10 @@
             </label>
             <label>API key
               <input name="api_key" type="password" placeholder="{{ 'Using environment key' if has_api_key else 'Optional for local servers' }}" autocomplete="off">
+            </label>
+            <label class="settings-checkbox">
+              <input type="checkbox" name="unwrap_outer_cell" value="1">
+              <span>Document content is inside a single outer cell</span>
             </label>
           </details>
           <button id="startButton" class="primary-button" type="submit">Start</button>

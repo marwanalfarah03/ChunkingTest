@@ -1930,7 +1930,11 @@ def run_pipeline(job: UiJob) -> None:
         job.update_step("prepare", "running", "Extracting text, tables, colors, and embedded files")
         job.set_progress(current=0, total=1, detail="Extracting text, tables, colors, and embedded files")
         document = chunking.build_document_paths(job.document_path)
-        export_result = chunking.export_document(document, reporter=lambda _message: None)
+        export_result = chunking.export_document(
+            document,
+            reporter=lambda _message: None,
+            unwrap_outer_cell=bool(job.config.get("unwrap_outer_cell")),
+        )
         job.artifact_dir = Path(export_result["table_map_path"]).parent.resolve()
         chunk_count = int(export_result.get("chunk_count") or 0)
         job.update_step("prepare", "done", f"{chunk_count} parts extracted")
@@ -2049,6 +2053,7 @@ def api_upload() -> Response:
             "max_classification_json_retries": int(request.form.get("max_classification_json_retries") or 0),
             "max_inspection_retries": int(request.form.get("max_inspection_retries") or 6),
             "max_section_json_retries": int(request.form.get("max_section_json_retries") or 6),
+            "unwrap_outer_cell": request.form.get("unwrap_outer_cell") == "1",
         }
         job = UiJob(
             id=job_id,
