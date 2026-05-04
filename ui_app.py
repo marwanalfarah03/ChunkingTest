@@ -45,7 +45,7 @@ LEGACY_ASSET_PREFIX_RE = re.compile(r"^EM\d{6}_")
 COLOR_TOKEN_RE = re.compile(r"\s*\[#([0-9A-Fa-f]{6})\]\s*")
 RTL_CHAR_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 LTR_CHAR_RE = re.compile(r"[A-Za-z]")
-FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
+FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>|<HL:[^>]*>|</HL>", re.IGNORECASE)
 INVISIBLE_CHARS_RE = re.compile(r"[​‌‍‎‏‪-‮⁠﻿]")
 
 WORKFLOW_HEADER_LEVELS = {
@@ -540,6 +540,13 @@ class DocumentRenderer:
         for tag in ("strong", "em", "u"):
             html = re.sub(rf"&lt;({tag})&gt;", rf"<{tag}>", html, flags=re.IGNORECASE)
             html = re.sub(rf"&lt;/({tag})&gt;", rf"</{tag}>", html, flags=re.IGNORECASE)
+        html = re.sub(
+            r"&lt;HL:(.*?)&gt;",
+            lambda m: f'<a href="{m.group(1).replace("&amp;", "&")}" target="_blank" rel="noopener noreferrer">',
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = re.sub(r"&lt;/HL&gt;", "</a>", html, flags=re.IGNORECASE)
         html = html.replace("\n", "<br>")
         return re.sub(
             r"&lt;span class=&quot;color-chip&quot; style=&quot;--chip-color: (#[0-9A-Fa-f]{6})&quot;&gt;&lt;/span&gt;",

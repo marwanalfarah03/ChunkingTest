@@ -35,7 +35,7 @@ DEFAULT_TABLE_MAP_NAME = "schema_table_map.json"
 DEFAULT_CELL_MAP_NAME = "schema_cell_map.json"
 DEFAULT_ASSET_MAP_NAME = "schema_asset_map.json"
 EMPTY_TABLE_SENTINEL = "(empty table)"
-PRESERVED_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:strong|em|u)>", re.IGNORECASE)
+PRESERVED_FORMATTING_TAG_PATTERN = re.compile(r"</?(?:strong|em|u)>|<HL:[^>]*>|</HL>", re.IGNORECASE)
 INVISIBLE_TEXT_CHAR_PATTERN = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060\ufeff]")
 ASSET_REFERENCE_PATTERN = re.compile(r"<(EM\d{6})>")
 TABLE_REFERENCE_PATTERN = re.compile(r"<TB\d{6}>")
@@ -323,10 +323,12 @@ def read_relationships(archive: zipfile.ZipFile, member_name: str) -> dict[str, 
         if not rel_id or not target:
             continue
         target_mode = relationship.get("TargetMode")
-        resolved_target = None if (target_mode or "").lower() == "external" else resolve_relationship_target(member_name, target)
+        is_external = (target_mode or "").lower() == "external"
+        resolved_target = None if is_external else resolve_relationship_target(member_name, target)
         relationships[rel_id] = {
             "type": relationship.get("Type"),
             "target": resolved_target,
+            "raw_target": target if is_external else None,
             "target_mode": target_mode,
         }
     return relationships
@@ -861,17 +863,27 @@ def extract_asset_placeholder(element: ET.Element, asset_context: AssetExportCon
     return None
 
 
-def iter_paragraph_runs(paragraph: ET.Element) -> Iterable[ET.Element]:
+def iter_paragraph_runs(
+    paragraph: ET.Element,
+    relationships: dict[str, dict[str, str | None]] | None = None,
+) -> Iterable[tuple[ET.Element, str | None]]:
     for child in list(paragraph):
         if child.tag == qn("w:r"):
-            yield child
+            yield child, None
         elif child.tag == qn("w:hyperlink"):
+            url: str | None = None
+            if relationships:
+                rel_id = child.get(qn("r:id"))
+                if rel_id:
+                    rel = relationships.get(rel_id, {})
+                    if (rel.get("target_mode") or "").lower() == "external":
+                        url = rel.get("raw_target") or None
             for run in child.findall("./w:r", NS):
-                yield run
+                yield run, url
 
 
-def format_inline_text(text: str, bold: bool, italic: bool, underline: bool) -> str:
-    if not text or not text.strip() or (not bold and not italic and not underline):
+def format_inline_text(text: str, bold: bool, italic: bool, underline: bool, url: str | None = None) -> str:
+    if not text or not text.strip() or (not bold and not italic and not underline and not url):
         return text
     leading_length = len(text) - len(text.lstrip(" \t"))
     trailing_length = len(text) - len(text.rstrip(" \t"))
@@ -889,6 +901,9 @@ def format_inline_text(text: str, bold: bool, italic: bool, underline: bool) -> 
         formatted = f"<em>{formatted}</em>"
     if bold:
         formatted = f"<strong>{formatted}</strong>"
+    if url:
+        safe_url = url.replace("<", "%3C").replace(">", "%3E")
+        formatted = f"<HL:{safe_url}>{formatted}</HL>"
     return f"{leading}{formatted}{trailing}"
 
 
@@ -901,8 +916,10 @@ def render_paragraph_runs(paragraph: ET.Element, asset_context: AssetExportConte
         false_values={"none"},
     )
 
+    relationships = asset_context.relationships if asset_context is not None else None
+
     segments: list[list[object]] = []
-    for run in iter_paragraph_runs(paragraph):
+    for run, url in iter_paragraph_runs(paragraph, relationships):
         run_properties = run.find("./w:rPr", NS)
         bold = bool_property(run_properties.find("./w:b", NS) if run_properties is not None else None, paragraph_bold)
         italic = bool_property(run_properties.find("./w:i", NS) if run_properties is not None else None, paragraph_italic)
@@ -932,7 +949,7 @@ def render_paragraph_runs(paragraph: ET.Element, asset_context: AssetExportConte
             elif child.tag in {qn("w:drawing"), qn("w:object"), qn("w:pict")}:
                 placeholder = extract_asset_placeholder(child, asset_context)
                 if placeholder:
-                    segments.append([False, False, False, placeholder])
+                    segments.append([False, False, False, None, placeholder])
                 continue
 
             if not text:
@@ -942,14 +959,15 @@ def render_paragraph_runs(paragraph: ET.Element, asset_context: AssetExportConte
                 and segments[-1][0] == bold
                 and segments[-1][1] == italic
                 and segments[-1][2] == underline
+                and segments[-1][3] == url
             ):
-                segments[-1][3] = f"{segments[-1][3]}{text}"
+                segments[-1][4] = f"{segments[-1][4]}{text}"
             else:
-                segments.append([bold, italic, underline, text])
+                segments.append([bold, italic, underline, url, text])
 
     return "".join(
-        format_inline_text(text, bool(bold), bool(italic), bool(underline))
-        for bold, italic, underline, text in segments
+        format_inline_text(text, bool(bold), bool(italic), bool(underline), url)
+        for bold, italic, underline, url, text in segments
     )
 
 
