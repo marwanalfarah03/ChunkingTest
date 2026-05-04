@@ -33,6 +33,7 @@ The content may contain:
 Identifying full-width vs. step rows:
 - A row with cells spanning the entire table width is a header/group row.
 - A row with multiple separate cells (one per column) is a step row.
+- A full-width cell may contain multiple lines of text, all between the same pair of horizontal `+---+` borders. Those lines belong to one cell — join them with `\n` and use the result as the single `heading` value. Do not emit separate entries for individual lines within the same cell.
 
 Repeated structural rows to skip:
 Some documents repeat structural rows mid-table as a formatting artifact (e.g., when a new sub-table begins in the source Word document). Skip any row — regardless of position — that matches either of the following patterns:

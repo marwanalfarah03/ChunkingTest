@@ -27,6 +27,7 @@ The content may contain:
 - Full-width rows: section heading, control sub-headings.
 - Step rows: one cell per column (control step, responsible party, etc.).
 - Color codes, HTML tags, ASCII borders.
+- A full-width cell may contain multiple lines of text, all between the same pair of horizontal `+---+` borders. Those lines belong to one cell — join them with `\n` and use the result as the single `heading` value. Do not emit separate entries for individual lines within the same cell.
 
 ---
 OUTPUT FORMAT
