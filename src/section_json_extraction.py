@@ -123,6 +123,7 @@ def build_user_prompt(
     span_chunk_file_names: list[str],
     content: str,
     column_inspection_context: str,
+    co_sections: set[str] | None = None,
 ) -> str:
     section_meta = SECTION_INDEX[section_id]
     source_files_str = ", ".join(span_chunk_file_names)
@@ -134,6 +135,17 @@ def build_user_prompt(
         f"Target section: {section_id} — {section_meta['arabic']} ({section_meta['english']})",
         f"Source files: {source_files_str}",
     ]
+
+    if section_id == "SEC02" and co_sections and "SEC01" in co_sections:
+        parts.append("")
+        parts.append(
+            "Important: This chunk is classified as both SEC01 and SEC02. "
+            "It may contain SEC01 content — the policies and procedures department name "
+            "and/or a bank header image (asset marker) — in addition to the SEC02 document "
+            "header table. Ignore all SEC01 elements entirely: skip any department name text "
+            "and any image or asset markers that belong to the department banner. Extract only "
+            "the SEC02 document header table rows."
+        )
 
     if column_inspection_context:
         parts.append("")
@@ -434,6 +446,13 @@ def extract_document_sections(
             column_inspection_result, section_id
         )
 
+        co_sections: set[str] = {
+            sid
+            for record in span_records
+            for sid in record.get("predicted_sections", [])
+            if sid != section_id
+        }
+
         system_prompt = load_section_system_prompt(section_id)
         user_prompt = build_user_prompt(
             document_name=document_path.name,
@@ -441,6 +460,7 @@ def extract_document_sections(
             span_chunk_file_names=span_chunk_names,
             content=content,
             column_inspection_context=column_inspection_context,
+            co_sections=co_sections,
         )
 
         section_meta = SECTION_INDEX[section_id]
