@@ -83,7 +83,8 @@ Some documents have a table that is structurally wider than its content — the 
 Rules:
 - "columns" must exactly match the resolved valid_column_order from the inspection result — UNLESS the dummy-empty-columns rule above applies, in which case use the 2 visible column labels from the rendered table. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" lists actual header cell IDs from the inspection result, or [] if absent.
-- Do NOT include the column header row cells in the "entries" list.
+- Do NOT include the column header row cells in the "entries" list. Any subsequent appearance of column header labels (e.g., "الخطوات" / "المكلف بالتنفيذ" or their bold/italic/colored variants) mid-table is a duplicate and must be omitted entirely.
+- A full-width row whose core text (after stripping all formatting tags and color codes) is just the section title word or a close variant (e.g., "الإجراءات الرقابية", "Control Procedures") must be omitted entirely — do not emit it as any entry type. The real section heading appears exactly once at the very start with a numeric prefix; every subsequent bare repetition is structural noise.
 - Preserve all cell IDs (CL000XXX) exactly.
 - Preserve text exactly including bold tags, color codes, and original language.
 - Preserve exact document order of all entries.

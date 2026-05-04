@@ -37,8 +37,8 @@ Identifying full-width vs. step rows:
 
 Repeated structural rows to skip:
 Some documents repeat structural rows mid-table as a formatting artifact (e.g., when a new sub-table begins in the source Word document). Skip any row — regardless of position — that matches either of the following patterns:
-- A full-width row whose text is just the section title (e.g., "الإجراء", "Procedure", or a close variant), with no numbering prefix and no meaningful sub-process name. The real section heading only appears once at the very start with a numeric prefix (e.g., "5. الإجراء [#222A35]"); any bare repetition of the section name mid-table is structural noise.
-- A multi-cell row whose cells contain only column header labels (e.g., "الخطوات" / "المكلف بالتنفيذ", "Steps" / "Action Owner", or their bold/colored variants). The actual column header row is already captured in "header_cell_ids"; any subsequent appearance of the same labels is a duplicate and must be omitted from entries entirely.
+- A full-width row whose core text (after stripping all formatting tags such as <strong>, <em>, etc., and color codes like [#xxxxxx]) is just the section title word or its close variant (e.g., "الإجراء", "الاجراء", "Procedure"). These repetitions may appear plain, italicised, bold, or with any color code — the formatting does not change their nature. The real section heading appears exactly once at the very start with a numeric prefix (e.g., "5. الإجراء [#222A35]"); every subsequent occurrence of the bare section name is structural noise and must be omitted entirely — do not emit it as a group_header, subgroup_header, or any other entry type.
+- A multi-cell row whose cells contain only column header labels (e.g., "الخطوات" / "المكلف بالتنفيذ", "Steps" / "Action Owner", or their bold/colored/italic variants). The actual column header row is already captured in "header_cell_ids"; any subsequent appearance of the same labels is a duplicate and must be omitted from entries entirely.
 
 ---
 OUTPUT FORMAT

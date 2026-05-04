@@ -44,9 +44,16 @@ Return only valid JSON with this exact structure:
   ]
 }
 
+Dummy empty columns:
+Some documents have a table that is structurally wider than its content — the column header inspection returns generic labels (e.g., "Column 1", "Column 2", "Column 3", "Column 4", "Column 5") with `header_state: "missing"` or `"hidden_invalid"`, but one or more columns are always empty in every data row. In this case:
+- Ignore the empty dummy columns entirely.
+- Use the visible column label text from the table's rendered header row (e.g., "رقم الاصدار" / "تاريخه" / "تم الإعداد / التعديل من قبل" / "اسباب التعديل") as the column names instead of the generic "Column N" labels.
+- Output only the columns that contain actual data in "columns" and include only those keys in each row entry.
+- Set "header_cell_ids" to [] since the inspection did not resolve real header cells.
+
 Rules:
-- Use the column labels from the column header inspection result as keys.
-- "columns" must exactly match the resolved valid_column_order from the inspection result.
+- Use the column labels from the column header inspection result as keys — UNLESS the dummy-empty-columns rule above applies, in which case use the visible column labels from the rendered header row.
+- "columns" must exactly match the resolved valid_column_order from the inspection result — UNLESS the dummy-empty-columns rule above applies, in which case list only the non-empty columns using their visible labels.
 - "header_cell_ids" must list the actual header cell IDs from the inspection result (left to right). If no header row exists (missing), set "header_cell_ids" to [].
 - If the column header row is visible, do NOT duplicate those cells as a data row.
 - Include ALL data rows in order — this is the complete version history.
