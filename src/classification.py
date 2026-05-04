@@ -207,7 +207,6 @@ def parse_prediction_payload(response_text: str) -> list[str]:
     if not normalized_sections:
         raise ValueError("The 'sections' list must not be empty; use SEC99 when nothing fits.")
 
-    normalized_sections.sort(key=section_sort_key)
     return normalized_sections
 
 

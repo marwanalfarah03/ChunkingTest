@@ -361,15 +361,21 @@ def extract_document_sections(
     for section_id in SECTIONS_TO_PROCESS:
         all_spans.extend(build_section_spans(chunk_records, section_id))
 
+    def _span_sort_key(span: dict[str, Any]) -> tuple[int, int, int]:
+        records = span["records"]
+        first_chunk_index = records[0]["index"] if records else 999_999
+        # Secondary key: position of this section within the first chunk's predicted
+        # sections list (document order), falling back to canonical order.
+        chunk_sections: list[str] = records[0].get("predicted_sections", []) if records else []
+        try:
+            section_pos = chunk_sections.index(span["section_id"])
+        except ValueError:
+            section_pos = section_order_index.get(span["section_id"], 999)
+        return first_chunk_index, section_pos, span["span_index"]
+
     # Sort spans by document position (first chunk's original index) so that
     # the results list preserves the order chunks appear in the document.
-    all_spans.sort(
-        key=lambda span: (
-            span["records"][0]["index"] if span["records"] else 999_999,
-            section_order_index.get(span["section_id"], 999),
-            span["span_index"],
-        )
-    )
+    all_spans.sort(key=_span_sort_key)
 
     client, resolved_base_url = initialize_client(
         base_url=base_url, api_key=api_key, model=model

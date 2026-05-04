@@ -82,7 +82,7 @@ def _parse_section_ids(raw: str) -> list[str] | None:
         if p not in seen:
             seen.add(p)
             unique.append(p)
-    return sorted(unique, key=section_sort_key)
+    return unique
 
 
 # ---------------------------------------------------------------------------

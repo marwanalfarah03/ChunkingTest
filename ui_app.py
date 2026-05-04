@@ -1876,7 +1876,7 @@ def apply_review_updates(job: UiJob) -> dict[str, Any]:
         invalid = [section_id for section_id in selected_sections if section_id not in classification.VALID_SECTION_IDS]
         if invalid:
             raise PipelineError(f"Unknown document area selected: {', '.join(invalid)}")
-        selected_sections = sorted(dict.fromkeys(selected_sections), key=classification.section_sort_key)
+        selected_sections = list(dict.fromkeys(selected_sections))
         original = list(result.get("predicted_sections") or [])
         if "llm_predicted_sections" not in result:
             result["llm_predicted_sections"] = original
