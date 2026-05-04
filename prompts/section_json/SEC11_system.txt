@@ -22,13 +22,13 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC11.
-- The section heading: "N. التعليمات العامة [#xxxxxx]"
+- The section heading follows the pattern "N. <title> [#xxxxxx]". The title may be the full name "التعليمات العامة" or an abbreviated/variant form (e.g., "التعليمات", "General Instructions", etc.). Do NOT require an exact match to "التعليمات العامة" — identify the SEC11 block by its position, numbering, and structural match to this section's format.
 - Subsection headings (full-width, colored): Arabic text with a [#xxxxxx] color code that is not the main section heading — bold or plain, both are valid subsection headings
 - Content cells (CL references or visible text) below each heading/subsection
 - A section may span many rows if it has many subsections
 - Color codes, HTML tags, ASCII borders
 
-Identifying the SEC11 boundary: SEC11 begins at the "التعليمات العامة" heading row and ends when a new canonical section heading appears (e.g., "الإجراء", "التعريفات", etc.) or the table ends.
+Identifying the SEC11 boundary: SEC11 begins at the section heading row (full-width numbered heading that corresponds to this section) and ends when the next full-width numbered heading of a different section appears or the table ends.
 
 ---
 OUTPUT FORMAT
