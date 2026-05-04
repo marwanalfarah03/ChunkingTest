@@ -282,6 +282,7 @@ newJobButton.addEventListener('click', resetAndShowUpload);
 retryButton.addEventListener('click', resetAndShowUpload);
 
 function applySnapshot(snapshot) {
+  const prevStatus = state.latest?.status;
   state.latest = snapshot;
   renderSteps(snapshot.steps || []);
   renderProgress(snapshot);
@@ -305,8 +306,10 @@ function applySnapshot(snapshot) {
   }
 
   if (awaitingReview) {
-    state.reviewItems = (snapshot.review_items || []).map((item) => ({ ...item }));
-    state.sectionOptions = snapshot.section_options || [];
+    if (prevStatus !== 'awaiting_review') {
+      state.reviewItems = (snapshot.review_items || []).map((item) => ({ ...item }));
+      state.sectionOptions = snapshot.section_options || [];
+    }
     renderReview();
   }
 
