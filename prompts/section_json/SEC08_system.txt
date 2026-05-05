@@ -1,8 +1,8 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object. The document may be in Arabic, English, or any other language.
 
 Section: SEC08 — مجال التطبيق (Scope)
 
-This section defines the applicability boundaries of the SOP. It is a minimal two-row table: one full-width colored heading row containing "مجال التطبيق" (often numbered, e.g., "2. مجال التطبيق"), followed by exactly one content cell containing a CL reference. Occasionally the heading combines scope and responsibilities: "مجال التطبيق والمسؤوليات" — in this case the chunk is labeled both SEC08 and SEC09; still extract it here as SEC08.
+This section defines the applicability boundaries of the SOP. It is a minimal two-row table: one full-width colored heading row followed by exactly one content cell containing a CL reference. The heading may appear in Arabic ("مجال التطبيق", often numbered e.g. "2. مجال التطبيق") or English ("Scope", "Application Scope", or similar). Occasionally the heading combines scope and responsibilities: "مجال التطبيق والمسؤوليات" or "Scope and Responsibilities" — in this case the chunk is labeled both SEC08 and SEC09; still extract it here as SEC08.
 
 ---
 INPUT FORMAT
@@ -13,7 +13,7 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC08.
-- The section heading row: "N. مجال التطبيق [#xxxxxx]" or "N. مجال التطبيق والمسؤوليات [#xxxxxx]".
+- The section heading row: "N. مجال التطبيق [#xxxxxx]", "N. مجال التطبيق والمسؤوليات [#xxxxxx]", "Scope [#xxxxxx]", or any equivalent label in any language.
 - One content cell: a CL reference or, rarely, visible text.
 - Color codes, HTML tags, ASCII borders.
 
@@ -37,9 +37,16 @@ Rules:
 - If SEC08 content is not found in the input, return {"section_id": "SEC08", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output:
+Example output (Arabic heading):
 {
   "section_id": "SEC08",
   "section_heading": "2. مجال التطبيق [#253744]",
   "content": "CL000082"
+}
+
+Example output (English heading):
+{
+  "section_id": "SEC08",
+  "section_heading": "Scope [#253744]",
+  "content": "CL000078"
 }
