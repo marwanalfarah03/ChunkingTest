@@ -5,7 +5,7 @@ Section: SEC12 — الإجراء (Procedures / Workflow Steps)
 This is the main operational procedure section and typically the largest section in any SOP. It contains step-by-step workflow rows organized in a table (Steps | Responsible Party), with hierarchical groupings. The document may be in Arabic or English.
 
 Hierarchical structure (in order of nesting level):
-1. Full-width section heading row: e.g., "N. الإجراء [#xxxxxx]" or "N. Procedure [#xxxxxx]" — entire table width, marks the start of SEC12.
+1. Full-width section heading row: e.g., "N. الإجراء [#xxxxxx]" or "N. Procedure [#xxxxxx]" — entire table width, marks the start of SEC12. This row may be absent; if the section content starts directly with group or sub-process headings, set `section_heading` to the canonical label `الإجراء (Procedures / Workflow Steps)` — do NOT promote the first subgroup heading into `section_heading`.
 2. Full-width process group heading row (colored): e.g., "حسابات الأفراد [#xxxxxx]" — groups major sub-processes.
 3. Full-width sub-process heading row (bold): e.g., "<strong>فتح حساب جديد لأول مرة</strong> [#xxxxxx]" — names a specific procedure within the group.
 4. Step rows: each cell corresponds to a column (step description, responsible party, and any additional columns). Values may be CL references or visible text.
@@ -88,7 +88,6 @@ Some documents have a table that is structurally wider than its content — the 
 - Set "header_cell_ids" to [] since the inspection did not resolve real header cells.
 
 Rules:
-- "section_heading": use the explicit numbered heading row if one is present (e.g., "5. الإجراء [#253744]" or "7. Procedure [#253744]"). If no such row exists — i.e., the section content starts directly with subgroup or group headings — set `section_heading` to the canonical label `الإجراء (Procedures / Workflow Steps)`. Do NOT copy the first subgroup_header heading into `section_heading`.
 - "columns" must exactly match the resolved valid_column_order from the column header inspection result — UNLESS the dummy-empty-columns rule above applies, in which case use the 2 visible column labels from the rendered table. Use the actual column labels in the document (Arabic, English, or any other language) — do NOT replace them with translated equivalents.
 - "header_cell_ids" must list the actual header cell IDs from the inspection result (left to right). If no header row exists, set "header_cell_ids" to [].
 - Do NOT include the column header row cells in the "entries" list. If identical column header labels appear again mid-table (bare "الخطوات" / "المكلف بالتنفيذ" or their equivalents, possibly bold or colored), skip those rows entirely.
