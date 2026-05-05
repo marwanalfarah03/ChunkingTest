@@ -234,28 +234,6 @@ def detect_actual_header_labels(
     return [], [], None
 
 
-def detect_hidden_header_labels(
-    rows: list[dict[str, Any]],
-    column_count: int,
-) -> tuple[list[str], list[str], int | None]:
-    """Scan rows for the first non-title row where at least one cell is hidden but all
-    cells have readable plain_text. Covers the case of English-labelled hidden headers
-    in documents whose canonical order uses Arabic labels.
-    """
-    for row in rows[:PROMPT_ROW_LIMIT]:
-        if row["is_full_width_title"]:
-            continue
-        cells = sorted(row["cells"], key=lambda c: (int(c["col"]), str(c["cell_id"])))
-        if len(cells) != column_count:
-            continue
-        if all(cell["displayed_in_chunk"] for cell in cells):
-            continue  # fully visible — already handled by detect_actual_header_labels
-        labels = [cell["plain_text"].strip() for cell in cells]
-        if all(labels):
-            return labels, [cell["cell_id"] for cell in cells], row["row_index"]
-    return [], [], None
-
-
 def resolve_chunk_path(relative_path: str | None) -> Path | None:
     if not relative_path:
         return None
@@ -815,28 +793,6 @@ def build_heuristic_resolution(
             "brief_description": (
                 f"Actual column labels detected from visible header row: "
                 f"{format_column_order(actual_labels)}."
-            ),
-        }
-
-    # 2.5. Header exists but is hidden and labels are in a different language from the
-    #      canonical order (e.g. English labels for an Arabic canonical order). Canonical
-    #      similarity matching fails across scripts, so we report the header row as
-    #      hidden_invalid and let the LLM resolve the actual column order from plain_text.
-    hidden_labels, hidden_cell_ids, hidden_row_index = detect_hidden_header_labels(rows, col_count)
-    if hidden_labels:
-        fallback_order = list(allowed_orders[0]) if allowed_orders else hidden_labels
-        return {
-            "status": "resolved",
-            "inspection_required": True,
-            "header_state": "hidden_invalid",
-            "valid_column_order": fallback_order,
-            "actual_header_row_exists": True,
-            "actual_header_row_index": hidden_row_index,
-            "actual_header_cell_ids": hidden_cell_ids,
-            "brief_description": (
-                f"Hidden header row at row {hidden_row_index} has labels {hidden_labels!r} that "
-                f"do not match the canonical Arabic order. LLM must determine actual column order "
-                f"from plain_text values in row_excerpt."
             ),
         }
 
