@@ -657,7 +657,7 @@ class DocumentRenderer:
         content_type = str(asset.get("content_type") or "")
         url = f"{self.asset_url_prefix}/{escape(asset_id)}"
         if content_type.startswith("image/"):
-            return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}">' f'<figcaption>{escape(label)}</figcaption></figure>'
+            return '<figure class="embedded-asset">' f'<img src="{url}" alt="{escape(label)}"></figure>'
         return f'<a class="embedded-file" href="{url}" download="{escape(download_name)}"><span>Embedded file</span><strong>{escape(label)}</strong></a>'
 
     def cells_for_table(self, table_id: str) -> list[dict[str, Any]]:
