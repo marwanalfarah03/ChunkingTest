@@ -86,7 +86,7 @@ Rules:
 - Choose the format that best matches the structure found.
 - Use Format A when there is a single heading followed by a single content block (one CL reference or one text value).
 - Use Format B when the section has multiple rows with 2 cells each (term-definition pairs), with or without a column header row. Do NOT flatten these into a single content string — preserve the pairing.
-- When using Format B with no column header row, infer column names from context: for Arabic documents use ["المصطلح", "التعريف"]; for English documents use ["Term", "Definition"]. Set header_cell_ids to [].
+- When using Format B with no column header row, infer column names from the cell positions. In Arabic DOCX files, table cells are stored left-to-right in the source XML, so the left column in the rendered output is the visual-left column of the original Arabic RTL table: for Arabic documents use ["التعريف", "المصطلح"] (definition on left, term on right); for English documents use ["Term", "Definition"] (term on left). Set header_cell_ids to [].
 - Use Format C when there are multiple named sub-blocks (each with its own heading), regardless of how many source tables they came from.
 - For Format C, set `section_heading` to the canonical SEC18 section label `التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)`; do NOT copy one of the subsection headings into `section_heading`.
 - Recognize SEC18 headings in any language — do NOT return not_found just because the heading is in English or uses a different phrasing.
@@ -129,12 +129,12 @@ Example output (Format B — Arabic, no column header row, inferred columns):
   "section_id": "SEC18",
   "section_heading": "3. التعاريف [#323E4F]",
   "format": "table",
-  "columns": ["المصطلح", "التعريف"],
+  "columns": ["التعريف", "المصطلح"],
   "header_cell_ids": [],
   "rows": [
-    {"المصطلح": "CL000031", "التعريف": "CL000032"},
-    {"المصطلح": "CL000033", "التعريف": "CL000034"},
-    {"المصطلح": "CL000035", "التعريف": "CL000036"}
+    {"التعريف": "CL000031", "المصطلح": "CL000032"},
+    {"التعريف": "CL000033", "المصطلح": "CL000034"},
+    {"التعريف": "CL000035", "المصطلح": "CL000036"}
   ]
 }
 
