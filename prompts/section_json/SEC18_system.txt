@@ -15,8 +15,8 @@ This section has three possible output formats depending on the structure found 
 Format A — Simple (one heading + one content block):
 A heading row followed by a single content cell (CL reference or visible text).
 
-Format B — Glossary table (one heading + column headers + multiple rows):
-A heading row, then a column-header row, then multiple definition rows.
+Format B — Glossary table (one heading + multiple term-definition rows):
+A heading row followed by multiple 2-column rows where each row is a term-definition pair. A column-header row may or may not be present. Use this format whenever the section contains multiple rows with 2 cells each — even if there is no explicit column header row.
 
 Format C — Multi-section (several sub-headings, each with content):
 SEC18 appears as multiple sub-blocks, each with its own heading and content. This happens when the section is split across multiple source tables or when the document separates "Terms", "Definitions", and "Abbreviations" into distinct named blocks.
@@ -32,7 +32,7 @@ The content may contain:
 - Multiple sections merged together. Focus only on SEC18.
 - One or more SEC18-related heading rows (in any language) in one of the forms above.
 - For Format A: one content cell (CL reference or visible text) after the heading.
-- For Format B: a column-header row followed by multiple definition rows.
+- For Format B: a column-header row followed by multiple definition rows, OR multiple 2-column data rows with no header row.
 - For Format C: repeated heading + content block pairs, possibly from multiple merged source tables.
 - Color codes, HTML tags, ASCII borders.
 - Plain text that appears outside the ASCII table borders (i.e., not inside `| ... |` cell delimiters), either before or after the table rows. This text is part of the section content and must NOT be dropped. Include it as if it were an additional content item.
@@ -84,8 +84,9 @@ For Format C, if a sub-block has multiple content items instead of one, use "val
 ---
 Rules:
 - Choose the format that best matches the structure found.
-- Use Format A when there is a single heading followed by a single content block.
-- Use Format B when the section has a column-header row and multiple definition rows.
+- Use Format A when there is a single heading followed by a single content block (one CL reference or one text value).
+- Use Format B when the section has multiple rows with 2 cells each (term-definition pairs), with or without a column header row. Do NOT flatten these into a single content string — preserve the pairing.
+- When using Format B with no column header row, infer column names from context: for Arabic documents use ["المصطلح", "التعريف"]; for English documents use ["Term", "Definition"]. Set header_cell_ids to [].
 - Use Format C when there are multiple named sub-blocks (each with its own heading), regardless of how many source tables they came from.
 - For Format C, set `section_heading` to the canonical SEC18 section label `التعريفات والمختصرات والمصطلحات (Definitions / Terms / Abbreviations)`; do NOT copy one of the subsection headings into `section_heading`.
 - Recognize SEC18 headings in any language — do NOT return not_found just because the heading is in English or uses a different phrasing.
@@ -108,7 +109,7 @@ Example output (Format A — Arabic):
   "content": "CL000104"
 }
 
-Example output (Format B — Arabic):
+Example output (Format B — Arabic, with column header row):
 {
   "section_id": "SEC18",
   "section_heading": "4. التعريفات والمختصرات والمصطلحات المستخدمة [#243744]",
@@ -120,6 +121,20 @@ Example output (Format B — Arabic):
       "المصطلح": "CL000107",
       "التعريف": "CL000108"
     }
+  ]
+}
+
+Example output (Format B — Arabic, no column header row, inferred columns):
+{
+  "section_id": "SEC18",
+  "section_heading": "3. التعاريف [#323E4F]",
+  "format": "table",
+  "columns": ["المصطلح", "التعريف"],
+  "header_cell_ids": [],
+  "rows": [
+    {"المصطلح": "CL000031", "التعريف": "CL000032"},
+    {"المصطلح": "CL000033", "التعريف": "CL000034"},
+    {"المصطلح": "CL000035", "التعريف": "CL000036"}
   ]
 }
 
