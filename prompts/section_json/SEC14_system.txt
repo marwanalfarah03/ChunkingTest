@@ -1,10 +1,12 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object. The document may be in Arabic, English, or any other language.
 
 Section: SEC14 — التقارير والكشوفات (Reports & Statements)
 
-This section lists the output reports, statements, extracts, and scheduled deliverables produced by the procedure. It is almost always a minimal two-row table: one full-width heading row "التقارير والكشوفات" (often numbered) followed by a single content cell (CL reference). Occasionally the section has a slightly larger table with a few visible rows (e.g., named reports with frequency or distribution notes), but this is rare.
+This section lists the output reports, statements, extracts, and scheduled deliverables produced by the procedure. It is almost always a minimal two-row table: one full-width heading row followed by a single content cell (CL reference). Occasionally the section has a slightly larger table with a few visible rows (e.g., named reports with frequency or distribution notes), but this is rare.
 
-Note: In a small number of documents, SEC14 and SEC15 share the same txt file. Focus only on SEC14 content (the "التقارير والكشوفات" block). SEC15 ("الملفات ومدد الحفظ") is a separate section even when adjacent.
+The section heading may appear in Arabic ("التقارير والكشوفات") or English ("Reports and Statements", "Forms and Reports", "Reports", or similar). Recognize the section in any language.
+
+Note: In a small number of documents, SEC14 and SEC15 share the same txt file. Focus only on SEC14 content (the "التقارير والكشوفات" / "Reports" block). SEC15 ("الملفات ومدد الحفظ" / "Files and Retention") is a separate section even when adjacent.
 
 ---
 INPUT FORMAT
@@ -15,7 +17,7 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC14.
-- The section heading: "N. التقارير والكشوفات [#xxxxxx]"
+- The section heading: "N. التقارير والكشوفات [#xxxxxx]" or "N. Forms and Reports [#xxxxxx]" or any equivalent label in any language.
 - One content cell: a CL reference or, rarely, a few rows of visible report descriptions.
 - Color codes, HTML tags, ASCII borders.
 
@@ -49,9 +51,16 @@ Rules:
 - If SEC14 content is not found in the input, return {"section_id": "SEC14", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output:
+Example output (Arabic heading):
 {
   "section_id": "SEC14",
   "section_heading": "10. التقارير والكشوفات [#243744]",
   "content": "CL000330"
+}
+
+Example output (English heading):
+{
+  "section_id": "SEC14",
+  "section_heading": "9. Forms and Reports [#222A35]",
+  "content": "CL000182"
 }
