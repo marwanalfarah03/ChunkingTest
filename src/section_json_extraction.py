@@ -389,6 +389,26 @@ def extract_document_sections(
     # the results list preserves the order chunks appear in the document.
     all_spans.sort(key=_span_sort_key)
 
+    # Merge non-adjacent spans of the same section into one.  A Word table that
+    # spans multiple pages (with header repetition) often produces separate .txt
+    # chunks with a different-section chunk in between, which breaks the
+    # contiguous run and creates spurious extra spans.  SEC99 is intentionally
+    # excluded because each SEC99 table is an independent, unrelated item.
+    merged_spans: list[dict[str, Any]] = []
+    seen_section_spans: dict[str, dict[str, Any]] = {}
+    for span in all_spans:
+        sid = span["section_id"]
+        if sid == SEC99_ID:
+            merged_spans.append(span)
+        elif sid in seen_section_spans:
+            seen_section_spans[sid]["records"] = (
+                seen_section_spans[sid]["records"] + span["records"]
+            )
+        else:
+            seen_section_spans[sid] = span
+            merged_spans.append(span)
+    all_spans = merged_spans
+
     client, resolved_base_url = initialize_client(
         base_url=base_url, api_key=api_key, model=model
     )
