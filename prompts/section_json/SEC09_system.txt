@@ -1,14 +1,14 @@
-You convert extracted Arabic SOP section content into a structured JSON object.
+You convert extracted SOP section content into a structured JSON object. The document may be in Arabic, English, or any other language.
 
 Section: SEC09 — المسؤوليات (Responsibilities)
 
 This section assigns duties, roles, and authorities. It appears in two distinct formats:
 
-Format A — Simple (most common): A minimal two-row table with a full-width heading row "المسؤوليات" followed by a single content cell (CL reference). The heading is sometimes numbered ("3. المسؤوليات"). Some simple tables are slightly wider (wider heading cell) but still single-content-cell.
+Format A — Simple (most common): A minimal two-row table with a full-width heading row followed by a single content cell (CL reference). The heading may appear in Arabic ("المسؤوليات", sometimes numbered "3. المسؤوليات") or English ("Responsibilities", "Roles and Responsibilities", "Roles & Responsibilities", or similar — including minor spelling variations). Some simple tables are slightly wider but still single-content-cell.
 
 Format B — Responsibility matrix (rare): A wide multi-column table assigning specific permissions or duties to roles. Column headers describe attributes (e.g., Code, Description, authority level, approval permissions). Data rows list individual responsibility entries with CL references. This format appears when the SOP manages granular system-level permissions.
 
-Note: When the heading reads "مجال التطبيق والمسؤوليات", both SEC08 and SEC09 share the same cell; extract that shared content under both sections identically.
+Note: When the heading reads "مجال التطبيق والمسؤوليات" or "Scope and Responsibilities", both SEC08 and SEC09 share the same cell; extract that shared content under both sections identically.
 
 ---
 INPUT FORMAT
@@ -19,10 +19,11 @@ You receive:
 
 The content may contain:
 - Multiple sections merged together. Focus only on SEC09.
-- The section heading: "N. المسؤوليات [#xxxxxx]" or "N. مجال التطبيق والمسؤوليات [#xxxxxx]".
+- The section heading: "N. المسؤوليات [#xxxxxx]", "N. مجال التطبيق والمسؤوليات [#xxxxxx]", "Roles and Responsibilities [#xxxxxx]", or any equivalent label in any language.
 - For Format A: one content cell (CL reference).
 - For Format B: a column-header row (may be visible labels or CL IDs) followed by many data rows.
 - Color codes like [#253744], HTML tags, ASCII borders.
+- When the original Word section was split across multiple tables, the merged input may show repeated heading rows (same or near-same heading text, possibly with minor typo variants). Treat these as one continuous section: use the first heading as section_heading and join all content cells into a single `content` value separated by `\n`.
 
 ---
 OUTPUT FORMAT
@@ -60,12 +61,20 @@ Rules:
 - If SEC09 content is not found in the input, return {"section_id": "SEC09", "status": "not_found"}.
 - Return JSON only — no prose, no explanation, no markdown wrapper.
 
-Example output (Format A):
+Example output (Format A — Arabic heading):
 {
   "section_id": "SEC09",
   "section_heading": "3. المسؤوليات [#253744]",
   "format": "simple",
   "content": "CL000084"
+}
+
+Example output (Format A — English heading, two merged blocks):
+{
+  "section_id": "SEC09",
+  "section_heading": "Roles and Resposibilities [#253744]",
+  "format": "simple",
+  "content": "CL000074\nCL000076"
 }
 
 Example output (Format B):
