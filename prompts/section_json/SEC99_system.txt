@@ -7,17 +7,17 @@ This section is a catch-all for content that does not map to SEC01–SEC19. It i
 FORMAT A — Titled domain item (most common simple variant):
 A table with one full-width heading row containing a custom title (in any language — Arabic or English) followed by a single CL reference content cell. The heading is NOT a canonical SOP section identifier (SEC01–SEC19). English-language headings such as "1. Introduction", "2. Purpose", "3. Scope" are valid Format A items — do NOT treat them as canonical section names just because they sound like section titles. Examples: "4. برامج / شرائح حسابات العملاء", "9. للتمييز بين أنواع المحافظ في تقرير ATM", "1. Introduction", "2. Purpose", "3. Scope".
 
-FORMAT B — Authorization / permission matrix (9-column, large):
-A wide table with NO full-width section heading row; begins directly with a multi-column data/header row. Columns describe authorization attributes. Seen in Account Note management SOPs. Typical columns: Code | Description | Stopped Transaction DR/CR | Posted By | Removed By | على مستوى العميل/مستوى الحساب | Authorization | Approval Permissions | Notes. Column headers are bold and colored (e.g., #253744). Data cells are CL references. The table can have 30+ rows.
+FORMAT B — Multi-column matrix (any column count):
+A table with a visible column header row followed by multiple data rows. The section may or may not have a full-width heading row above the column headers. Column headers are colored and/or bold (e.g., colored with #253744 or #B4C6E7, with or without <strong> tags). Data cells are CL references or visible values. Use this format whenever the first non-full-width row contains visible text labels (not CL IDs) and is followed by data rows — regardless of column count, column names, or whether a full-width heading is present. Examples: approval/version tables (Prepared by | Notes | Version | Date), authorization matrices (Code | Description | ... | Notes), KPI matrices (KPI-ID | Description | ... | Threshold).
 
-FORMAT C — KPI / KRI metrics matrix (8-column):
-A wide table with NO full-width section heading; starts with a column header row. Columns describe performance metrics. Seen in security/risk management SOPs. Typical columns: KPI-ID | Description | Reporting Frequency | Reported to | Source | Red Threshold | Amber Threshold | [additional]. Column headers are bold and colored (e.g., #B4C6E7). First-column values may be visible system codes (e.g., "APO12-KPI01 [#B4C6E7]"); other cells may be CL references or visible values.
+FORMAT C — KPI / KRI metrics matrix (8-column) [legacy alias for Format B]:
+Treated identically to Format B. Use Format B output structure.
 
 FORMAT D — Empty table:
 The rendered content shows only "(empty table)" with no actual content.
 
 FORMAT E — Other custom formats:
-Any other table that does not fit SEC01–SEC19 canonical sections. This includes malformed tables, orphaned fragments, or system metadata dumps.
+Any table that does NOT have a visible column header row and does not fit Format A or Format D. This includes malformed tables, orphaned fragments, or system metadata dumps. Do NOT use Format E when the table has a clear column header row — use Format B instead.
 
 ---
 NESTED TABLE HANDLING
@@ -107,8 +107,8 @@ COLUMN HANDLING RULES FOR MATRIX FORMATS
 
 Column header identification:
 - The first non-full-width row is the column header row.
-- Column headers are typically bold (<strong>) and colored.
-- If a column header cell shows visible text (e.g., "<strong>Code</strong> [#253744]"), extract just the text label (e.g., "Code") as the column key. Preserve the color code in the "section_heading" or in a separate "header_row_raw" field if needed.
+- Column headers are colored and/or bold. They may appear as "<strong>Label</strong> [#xxxxxx]" (bold + colored), "Label [#xxxxxx]" (colored only, no bold), or plain visible text. Any non-full-width row whose cells show visible text labels (not CL IDs) is the column header row.
+- Extract just the text label stripped of <strong> tags and color codes as the column key (e.g., "Prepared/Amended by [#243744]" → key = "Prepared/Amended by").
 - If a column header cell shows a CL ID (hidden column header), use that CL ID as the column key.
 - "header_cell_ids": list the CL IDs of the header cells if the header row consists entirely of CL IDs; otherwise, for visible headers, set each entry to null or omit the field entirely.
 
@@ -230,6 +230,24 @@ Example — KPI/KRI matrix (8 columns, first column has visible values):
         "Red Threshold": "CL000083",
         "Amber Threshold": "CL000084",
         "Green Threshold": "CL000085"
+      }
+    ]
+  }
+]
+
+Example — Matrix with full-width heading + colored (non-bold) column headers:
+[
+  {
+    "format": "matrix",
+    "section_heading": "Internal Approval /IT Department [#243744]",
+    "columns": ["Prepared/Amended by", "Notes", "Version", "Date"],
+    "header_cell_ids": null,
+    "rows": [
+      {
+        "Prepared/Amended by": "CL000016",
+        "Notes": "CL000017",
+        "Version": "CL000018",
+        "Date": "CL000019"
       }
     ]
   }
