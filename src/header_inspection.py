@@ -54,7 +54,7 @@ Rules:
 - If the actual header row is present and its labels are visible (any language), use those exact labels as valid_column_order in the order they appear in the document.
 - If the actual header row is present but hidden (not displayed in the rendered chunk), its actual content is still available in the plain_text fields of row_excerpt. Read those plain_text values to determine the semantic meaning of each column, map each to the appropriate canonical Arabic label, and output valid_column_order in the actual document column order (leftmost column first). Do NOT blindly use the canonical order — the document may have columns in a different order from the canonical default.
 - If the actual header row is present but corrupt, duplicated, blank, or partially missing, still identify that row's cell ids and fall back to a canonical order if one is available.
-- If this extracted chunk has no actual header row, return no header cell ids and use the canonical section order (or the heuristic hint order if no canonical is available).
+- If this extracted chunk has no actual header row, return no header cell ids. To determine valid_column_order, examine the plain_text of data cells in row_excerpt: if col 1 cells contain person or department names (responsible parties) and col 2 cells contain numbered procedure steps, the actual order is المكلف بالتنفيذ → الخطوات; if col 1 cells contain procedure steps and col 2 cells contain person or department names, the order is الخطوات → المكلف بالتنفيذ. Output the canonical Arabic labels in the actual document column order — do NOT default to the canonical order if the data evidence shows a different layout.
 - If no canonical orders are provided (allowed_canonical_orders is empty), detect the actual column labels from the visible header row.
 - Return JSON only.
 """.strip()
@@ -867,7 +867,11 @@ def build_user_prompt(
         "(e.g. 'Action Owner' → 'المكلف بالتنفيذ', 'Steps' / 'Procedure' → 'الخطوات'), then output "
         "valid_column_order as the canonical Arabic labels in the actual document column order (leftmost column "
         "first). Do NOT default to the canonical order as-is — use the actual column positions from the document. "
-        "Only use the canonical order as-is when the header is entirely missing.\n"
+        "When the header is entirely missing, infer the actual column order from the data rows in row_excerpt: "
+        "examine the plain_text of cells in each column — if col 1 cells contain person/department names "
+        "(responsible parties) and col 2 cells contain numbered procedure steps, the actual order is "
+        "المكلف بالتنفيذ → الخطوات; if the opposite, use الخطوات → المكلف بالتنفيذ. "
+        "Output canonical Arabic labels in that actual order, not blindly in canonical order.\n"
         "- If no canonical orders are provided (allowed_canonical_orders is empty), detect column labels from the visible header row.\n"
         "- If actual_header_row_exists is false, actual_header_row_index must be null and actual_header_cell_ids must be empty.\n"
         "- If actual_header_row_exists is true, actual_header_cell_ids must list the real header cells from left to right.\n"
