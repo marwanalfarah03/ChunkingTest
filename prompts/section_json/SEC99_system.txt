@@ -5,7 +5,7 @@ Section: SEC99 — أخرى (Other / Unclassified)
 This section is a catch-all for content that does not map to SEC01–SEC19. It includes several distinct formats:
 
 FORMAT A — Titled domain item (most common simple variant):
-A table with one full-width heading row containing a custom Arabic title (NOT a canonical section name) followed by a single CL reference content cell. Examples: "4. برامج / شرائح حسابات العملاء", "9. للتمييز بين أنواع المحافظ في تقرير ATM", "4. تعليمات حماية المستهلك المالي الخاصة في الحسابات الجامدة", "5. الشروط والاحكام الخاصة بالصناديق الحديدية", "6. مسؤوليات دائرة شرائح العملاء".
+A table with one full-width heading row containing a custom title (in any language — Arabic or English) followed by a single CL reference content cell. The heading is NOT a canonical SOP section identifier (SEC01–SEC19). English-language headings such as "1. Introduction", "2. Purpose", "3. Scope" are valid Format A items — do NOT treat them as canonical section names just because they sound like section titles. Examples: "4. برامج / شرائح حسابات العملاء", "9. للتمييز بين أنواع المحافظ في تقرير ATM", "1. Introduction", "2. Purpose", "3. Scope".
 
 FORMAT B — Authorization / permission matrix (9-column, large):
 A wide table with NO full-width section heading row; begins directly with a multi-column data/header row. Columns describe authorization attributes. Seen in Account Note management SOPs. Typical columns: Code | Description | Stopped Transaction DR/CR | Posted By | Removed By | على مستوى العميل/مستوى الحساب | Authorization | Approval Permissions | Notes. Column headers are bold and colored (e.g., #253744). Data cells are CL references. The table can have 30+ rows.
@@ -46,8 +46,9 @@ The content may contain:
 - Potential empty tables (empty table marker).
 
 Identifying SEC99 boundaries within multi-section content:
-- SEC99 content does NOT start with a canonical section heading (not "الإجراء", "التعليمات العامة", "التقارير والكشوفات", etc.).
-- A custom non-canonical heading row, a wide multi-column data matrix, or an empty table marks SEC99.
+- SEC99 content does NOT start with a canonical section heading. Canonical headings are identified by their numbered section pattern matching SEC01–SEC19 titles (e.g., "الإجراء", "التعليمات العامة", "التقارير والكشوفات", "مقدمة", etc.).
+- English-language custom headings like "Introduction", "Purpose", "Scope", "Background" are NOT canonical section indicators in this context — they are valid SEC99 titled items.
+- A custom non-canonical heading row (Arabic or English), a wide multi-column data matrix, or an empty table marks SEC99.
 - SEC99 ends when a canonical section heading appears or the content ends.
 
 ---
@@ -141,12 +142,21 @@ GENERAL RULES
 ---
 EXAMPLES
 
-Example — Titled domain item:
+Example — Titled domain item (Arabic heading):
 [
   {
     "format": "titled_item",
     "section_heading": "4. برامج / شرائح حسابات العملاء [#253744]",
     "content": "CL000112"
+  }
+]
+
+Example — Titled domain item (English heading):
+[
+  {
+    "format": "titled_item",
+    "section_heading": "1. <strong>Introduction</strong> [#253744]",
+    "content": "CL000021"
   }
 ]
 
