@@ -52,6 +52,7 @@ Rules:
 - A full-width section title row is not a column-header row.
 - Hidden header cells can exist even when the rendered chunk only shows CL ids.
 - If the actual header row is present and its labels are visible (any language), use those exact labels as valid_column_order in the order they appear in the document.
+- If the actual header row is present but hidden (not displayed in the rendered chunk), its actual content is still available in the plain_text fields of row_excerpt. Read those plain_text values to determine the semantic meaning of each column, map each to the appropriate canonical Arabic label, and output valid_column_order in the actual document column order (leftmost column first). Do NOT blindly use the canonical order — the document may have columns in a different order from the canonical default.
 - If the actual header row is present but corrupt, duplicated, blank, or partially missing, still identify that row's cell ids and fall back to a canonical order if one is available.
 - If this extracted chunk has no actual header row, return no header cell ids and use the canonical section order (or the heuristic hint order if no canonical is available).
 - If no canonical orders are provided (allowed_canonical_orders is empty), detect the actual column labels from the visible header row.
@@ -227,6 +228,28 @@ def detect_actual_header_labels(
             continue
         if not all(cell["displayed_in_chunk"] for cell in cells):
             continue
+        labels = [cell["plain_text"].strip() for cell in cells]
+        if all(labels):
+            return labels, [cell["cell_id"] for cell in cells], row["row_index"]
+    return [], [], None
+
+
+def detect_hidden_header_labels(
+    rows: list[dict[str, Any]],
+    column_count: int,
+) -> tuple[list[str], list[str], int | None]:
+    """Scan rows for the first non-title row where at least one cell is hidden but all
+    cells have readable plain_text. Covers the case of English-labelled hidden headers
+    in documents whose canonical order uses Arabic labels.
+    """
+    for row in rows[:PROMPT_ROW_LIMIT]:
+        if row["is_full_width_title"]:
+            continue
+        cells = sorted(row["cells"], key=lambda c: (int(c["col"]), str(c["cell_id"])))
+        if len(cells) != column_count:
+            continue
+        if all(cell["displayed_in_chunk"] for cell in cells):
+            continue  # fully visible — already handled by detect_actual_header_labels
         labels = [cell["plain_text"].strip() for cell in cells]
         if all(labels):
             return labels, [cell["cell_id"] for cell in cells], row["row_index"]
@@ -795,6 +818,28 @@ def build_heuristic_resolution(
             ),
         }
 
+    # 2.5. Header exists but is hidden and labels are in a different language from the
+    #      canonical order (e.g. English labels for an Arabic canonical order). Canonical
+    #      similarity matching fails across scripts, so we report the header row as
+    #      hidden_invalid and let the LLM resolve the actual column order from plain_text.
+    hidden_labels, hidden_cell_ids, hidden_row_index = detect_hidden_header_labels(rows, col_count)
+    if hidden_labels:
+        fallback_order = list(allowed_orders[0]) if allowed_orders else hidden_labels
+        return {
+            "status": "resolved",
+            "inspection_required": True,
+            "header_state": "hidden_invalid",
+            "valid_column_order": fallback_order,
+            "actual_header_row_exists": True,
+            "actual_header_row_index": hidden_row_index,
+            "actual_header_cell_ids": hidden_cell_ids,
+            "brief_description": (
+                f"Hidden header row at row {hidden_row_index} has labels {hidden_labels!r} that "
+                f"do not match the canonical Arabic order. LLM must determine actual column order "
+                f"from plain_text values in row_excerpt."
+            ),
+        }
+
     # 3. Nothing found — fall back to the first canonical order or generic labels.
     if allowed_orders:
         default_order = list(allowed_orders[0])
@@ -859,7 +904,14 @@ def build_user_prompt(
         "- status must always be \"resolved\".\n"
         "- header_state must be one of visible_valid, hidden_valid, visible_invalid, hidden_invalid, missing.\n"
         "- valid_column_order: if the actual column header row is visible and contains text labels (in any language), "
-        "use those exact labels in document order. Only fall back to a canonical order when the header is hidden or missing.\n"
+        "use those exact labels in document order. "
+        "If the header row is hidden (header_state is hidden_valid or hidden_invalid), read the plain_text values "
+        "of the header cells from row_excerpt — they give the actual cell content even though the row is not "
+        "displayed. Map each cell's semantic meaning to the appropriate canonical Arabic label "
+        "(e.g. 'Action Owner' → 'المكلف بالتنفيذ', 'Steps' / 'Procedure' → 'الخطوات'), then output "
+        "valid_column_order as the canonical Arabic labels in the actual document column order (leftmost column "
+        "first). Do NOT default to the canonical order as-is — use the actual column positions from the document. "
+        "Only use the canonical order as-is when the header is entirely missing.\n"
         "- If no canonical orders are provided (allowed_canonical_orders is empty), detect column labels from the visible header row.\n"
         "- If actual_header_row_exists is false, actual_header_row_index must be null and actual_header_cell_ids must be empty.\n"
         "- If actual_header_row_exists is true, actual_header_cell_ids must list the real header cells from left to right.\n"
