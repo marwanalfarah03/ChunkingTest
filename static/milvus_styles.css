@@ -408,6 +408,44 @@ body.milvus-page {
   border-color: rgba(0,147,201,.22);
 }
 
+/* Rendered section — same styles as history/main-UI final output, scoped inside a card */
+.milvus-stitch-rendered {
+  margin-top: 18px;
+  border-top: 1px solid rgba(0,147,201,.18);
+  padding-top: 16px;
+}
+.milvus-stitch-rendered .final-section {
+  margin: 0;
+}
+
+/* Collapsed raw-text disclosure */
+.milvus-stitch-raw {
+  margin-top: 14px;
+  border-top: 1px solid rgba(36,55,70,.08);
+  padding-top: 10px;
+}
+.milvus-stitch-raw summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(24,38,50,.5);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  user-select: none;
+  list-style: none;
+}
+.milvus-stitch-raw summary::before {
+  content: '▶ ';
+  font-size: 10px;
+}
+.milvus-stitch-raw[open] summary::before {
+  content: '▼ ';
+}
+.milvus-stitch-raw .milvus-hit-text {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
 .milvus-stitch-pill {
   display: inline-flex;
   align-items: center;

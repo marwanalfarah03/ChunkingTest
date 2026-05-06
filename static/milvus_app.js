@@ -231,10 +231,21 @@ function renderStitchedDocs(documents = []) {
     const scoreHtml = doc.reranker_score != null
       ? `<span class="milvus-score-pill">${Number(doc.reranker_score).toFixed(4)}</span>`
       : '';
-    // Strip the metadata header block from the display text so it isn't doubled
-    let displayText = doc.text || '';
-    const markerEnd = displayText.indexOf('--- END RAG METADATA ---');
-    if (markerEnd !== -1) displayText = displayText.slice(markerEnd + '--- END RAG METADATA ---'.length).trimStart();
+
+    // Rendered section HTML (same as Final Output / history page)
+    const renderedSection = doc.rendered_html
+      ? `<div class="milvus-stitch-rendered">${doc.rendered_html}</div>`
+      : '';
+
+    // Raw stitched text — full content including RAG metadata header
+    const rawText = doc.text || '';
+    const rawBlock = rawText
+      ? `<details class="milvus-stitch-raw">
+           <summary>Raw stitched text</summary>
+           <div class="milvus-hit-text" ${dirAttrs(rawText)}>${escapeHtml(rawText)}</div>
+         </details>`
+      : '';
+
     return `
     <article class="milvus-hit-card milvus-hit-card-stitched">
       <div class="milvus-hit-head">
@@ -244,11 +255,12 @@ function renderStitchedDocs(documents = []) {
       </div>
       <h4 ${dirAttrs(doc.document_name || '')}>${escapeHtml(doc.document_name || 'Unknown document')}</h4>
       <div class="milvus-chip-row">
-        <span class="milvus-chip">${escapeHtml(doc.base_stem || doc.file_name || '')}</span>
+        <span class="milvus-chip">${escapeHtml(doc.file_name || '')}</span>
         <span class="milvus-chip">${escapeHtml(doc.section_id || 'No section')}</span>
       </div>
       <p class="milvus-hit-path" ${dirAttrs(doc.hierarchy_path || '')}>${escapeHtml(doc.hierarchy_path || 'No hierarchy path')}</p>
-      <div class="milvus-hit-text" ${dirAttrs(displayText)}>${escapeHtml(displayText)}</div>
+      ${renderedSection}
+      ${rawBlock}
     </article>`;
   }).join('');
 }

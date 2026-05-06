@@ -2724,6 +2724,192 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
     return stitched
 
 
+_HEADING_WS_RE = re.compile(r"\s+")
+_HTML_TAG_RE = re.compile(r"</?[^>]+>")
+_WORKFLOW_HEADER_TYPES = frozenset({"group_header", "subgroup_header", "sub_subgroup_header", "subsubgroup_header"})
+_WORKFLOW_HEADER_LEVEL: dict[str, int] = {
+    "group_header": 1, "subgroup_header": 2, "sub_subgroup_header": 3, "subsubgroup_header": 3,
+}
+_HIERARCHY_SHIFT_BTN_RE = re.compile(r"<button\b[^>]*\bdata-hierarchy-shift\b[^>]*>.*?</button>", re.DOTALL | re.IGNORECASE)
+
+
+def _normalize_heading(value: Any) -> str:
+    """Strip HTML tags, color tokens and invisible chars, then collapse whitespace.
+    Mirrors what plain_label() does in rag_txt_export so headings from section_json
+    can be compared with the plain-text versions stored in hierarchy_path.
+    """
+    text = str(value or "")
+    text = COLOR_TOKEN_RE.sub("", text)       # [#RRGGBB] color markers
+    text = FORMATTING_TAG_RE.sub("", text)    # <strong>, <em>, <HL:…> etc.
+    text = _HTML_TAG_RE.sub("", text)          # remaining HTML tags
+    text = INVISIBLE_CHARS_RE.sub("", text)
+    return _HEADING_WS_RE.sub(" ", text).strip()
+
+
+def _header_semantic_level(entry: dict[str, Any]) -> int | None:
+    """Return the semantic nesting level of a header entry, or None if not a header."""
+    etype = str(entry.get("type") or "")
+    if etype in _WORKFLOW_HEADER_TYPES:
+        return _WORKFLOW_HEADER_LEVEL.get(etype, 1)
+    if etype == "subsection":
+        try:
+            return max(1, int(entry.get("semantic_level") or entry.get("level") or 1))
+        except (TypeError, ValueError):
+            return 1
+    return None
+
+
+def _filter_section_entries_for_hierarchy(
+    entries: list[dict[str, Any]],
+    target_header_titles: list[str],
+) -> list[dict[str, Any]]:
+    """Return only the entries (plus their required ancestor headers) that sit
+    under the given header path.
+
+    target_header_titles is the ordered list of normalized header headings
+    derived from the hierarchy_path after stripping the section name prefix.
+    An empty list means no sub-hierarchy — all entries are returned as-is.
+
+    Two structural patterns are handled:
+    • Workflow sections (SEC12/13): group_header/subgroup_header are pure
+      structural containers; matching content lives in subsequent 'step' siblings.
+    • Hierarchy sections (SEC11/18): 'subsection' entries are both the header
+      AND the content container (their value/values fields hold the content).
+      When the subsection heading matches the final target level, the entry
+      itself is included directly so the renderer shows its content.
+    """
+    if not target_header_titles:
+        return list(entries)
+
+    normalized_target = [_normalize_heading(h) for h in target_header_titles]
+    result: list[dict[str, Any]] = []
+    # Stack: (semantic_level, normalized_title, entry, already_added_to_result)
+    header_stack: list[tuple[int, str, dict[str, Any], bool]] = []
+
+    def _flush_ancestors() -> None:
+        nonlocal header_stack
+        flushed: list[tuple[int, str, dict[str, Any], bool]] = []
+        for l, t, e, added in header_stack:
+            if not added:
+                result.append(e)
+            flushed.append((l, t, e, True))
+        header_stack = flushed
+
+    for entry in entries:
+        etype = str(entry.get("type") or "")
+        sem_level = _header_semantic_level(entry)
+
+        if sem_level is not None:
+            # Pop headers at the same or deeper semantic level
+            header_stack = [(l, t, e, a) for l, t, e, a in header_stack if l < sem_level]
+            title = _normalize_heading(entry.get("heading") or "")
+            current_path = [t for _, t, _, _ in header_stack] + [title]
+
+            if etype == "subsection" and current_path == normalized_target:
+                # SEC11/18 style: the subsection IS the content container.
+                # Flush ancestors and include this entry directly — the renderer
+                # will render its value/values fields as the content body.
+                _flush_ancestors()
+                result.append(entry)
+                header_stack.append((sem_level, title, entry, True))
+            else:
+                # Pure structural header (group_header etc.) — just track it.
+                header_stack.append((sem_level, title, entry, False))
+            continue
+
+        # Leaf entry (step / content / anything else)
+        current_titles = [t for _, t, _, _ in header_stack]
+        if current_titles != normalized_target:
+            continue
+
+        _flush_ancestors()
+        result.append(entry)
+
+    return result
+
+
+def enrich_stitched_with_html(stitched_documents: list[dict[str, Any]]) -> None:
+    """Add rendered_html to each stitched document in-place.
+
+    For each unique document_id, loads section_json_output.json once and
+    builds the DocumentRenderer (same path as the Final Output / history page).
+
+    For sections that have hierarchical entries (SEC12, SEC13, SEC11, SEC18),
+    the entries are filtered to only those that match the stitched group's
+    hierarchy_path — so only the relevant procedure/instruction steps are shown,
+    together with their ancestor group/subgroup headers for context.
+
+    Hierarchy-shift editing buttons are stripped from the output because the
+    stitched view is read-only.
+    """
+    unique_doc_ids = {doc["document_id"] for doc in stitched_documents}
+
+    for document_id in unique_doc_ids:
+        doc_path = doc_id_to_path(document_id)
+        if doc_path is None:
+            continue
+
+        section_json_path = doc_path / DEFAULT_SECTION_JSON_OUTPUT_NAME
+        if not section_json_path.exists():
+            continue
+
+        try:
+            section_json_payload = json.loads(section_json_path.read_text(encoding="utf-8"))
+            renderer = build_history_renderer(doc_path, document_id)
+        except Exception:
+            continue
+
+        # Build section_id → (section_json_dict, result_index) — first resolved match wins
+        section_lookup: dict[str, tuple[Any, int]] = {}
+        for result_index, result in enumerate(section_json_payload.get("results") or []):
+            if not isinstance(result, dict) or result.get("status") != "resolved":
+                continue
+            sid = str(result.get("section_id") or "")
+            if sid and sid not in section_lookup:
+                sj = result.get("section_json")
+                if isinstance(sj, dict) and sj.get("status") != "not_found":
+                    section_lookup[sid] = (sj, result_index)
+
+        for doc in stitched_documents:
+            if doc["document_id"] != document_id:
+                continue
+            section_id = doc.get("section_id") or ""
+            lookup_entry = section_lookup.get(section_id)
+            if lookup_entry is None:
+                doc["rendered_html"] = None
+                continue
+
+            section_json_dict, result_index = lookup_entry
+
+            # --- Derive the target header titles from hierarchy_path ---
+            section_json_for_render = section_json_dict
+            if isinstance(section_json_dict, dict) and isinstance(section_json_dict.get("entries"), list):
+                hierarchy_path = doc.get("hierarchy_path") or ""
+                section_heading = _normalize_heading(section_json_dict.get("section_heading") or "")
+                path_parts = [p.strip() for p in hierarchy_path.split(" > ")]
+                # Strip the leading section-name segment so we have only header titles
+                if path_parts and _normalize_heading(path_parts[0]) == section_heading:
+                    target_headers = path_parts[1:]
+                else:
+                    target_headers = path_parts[1:] if len(path_parts) > 1 else []
+
+                filtered_entries = _filter_section_entries_for_hierarchy(
+                    section_json_dict["entries"], target_headers
+                )
+                if not filtered_entries:
+                    doc["rendered_html"] = None
+                    continue
+                section_json_for_render = {**section_json_dict, "entries": filtered_entries}
+
+            try:
+                html = renderer.render_section_payload(section_id, section_json_for_render, result_index)
+                # Strip hierarchy-shift buttons — this is a read-only view
+                html = _HIERARCHY_SHIFT_BTN_RE.sub("", html)
+                doc["rendered_html"] = html
+            except Exception:
+                doc["rendered_html"] = None
+
+
 @app.post("/api/milvus/query")
 def api_milvus_query() -> Response:
     body = request.get_json(force=True, silent=True) or {}
@@ -2747,6 +2933,7 @@ def api_milvus_query() -> Response:
     except Exception as exc:
         return jsonify({"error": repair_text(exc)}), 500
     payload["stitched_documents"] = stitch_reranked_documents(payload.get("reranked_documents") or [])
+    enrich_stitched_with_html(payload["stitched_documents"])
     return jsonify(payload)
 
 
