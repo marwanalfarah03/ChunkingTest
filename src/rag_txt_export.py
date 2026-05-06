@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,11 @@ HL_TAG_RE = re.compile(r"<HL:([^>]+)>(.*?)</HL>", re.DOTALL)
 HTML_TAG_RE = re.compile(r"</?[^>]+>")
 INVISIBLE_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060\ufeff]")
 UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\.\s")
+
+RAG_CHUNK_WORD_LIMIT = 400  # target words per chunk (content only, excluding metadata)
+RAG_CHUNK_WORD_MAX = 500    # threshold above which splitting is triggered
+RAG_CHUNK_WORD_MIN = 100    # minimum words per fragment (avoid tiny orphan parts)
 
 
 def _normalize_hl_tag(m: re.Match) -> str:
@@ -220,6 +226,125 @@ def normalize_text_preserving_tables(value: str) -> str:
         compacted.append(f"{leading}{cleaned}" if cleaned else leading.rstrip())
         previous_blank = False
     return "\n".join(compacted).strip("\n")
+
+
+def count_words(text: str) -> int:
+    return len(text.split())
+
+
+def _is_table_block(text: str) -> bool:
+    first_line = text.split("\n", 1)[0].rstrip()
+    return is_grid_table_line(first_line)
+
+
+def _split_block_at_numbered_items(text: str) -> list[str]:
+    """Split a text block at top-level numbered items ('N. text').
+    The label header (if any) and the first item stay together.
+    Sub-bullets (○ • -) stay with their parent item.
+    """
+    lines = text.split("\n")
+    segments: list[str] = []
+    current: list[str] = []
+    current_has_item = False
+    for line in lines:
+        if current_has_item and _NUMBERED_ITEM_RE.match(line):
+            segments.append("\n".join(current))
+            current = [line]
+            current_has_item = True
+        else:
+            current.append(line)
+            if _NUMBERED_ITEM_RE.match(line):
+                current_has_item = True
+    if current:
+        segments.append("\n".join(current))
+    return [s for s in segments if s.strip()]
+
+
+def parse_content_segments(content_body: str) -> list[str]:
+    """Split content body into atomic segments for size-based splitting.
+
+    Priority order:
+    1. Blank lines are the primary split boundaries.
+    2. Grid tables are atomic — never split.
+    3. Large non-table segments are subdivided at numbered-item boundaries.
+    """
+    raw = re.split(r"\n\n+", content_body)
+    result: list[str] = []
+    for seg in raw:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if _is_table_block(seg):
+            result.append(seg)
+        elif count_words(seg) > RAG_CHUNK_WORD_MAX:
+            sub = _split_block_at_numbered_items(seg)
+            result.extend(sub if len(sub) > 1 else [seg])
+        else:
+            result.append(seg)
+    return result
+
+
+def _compute_split_groups(segments: list[str], total_words: int) -> list[list[str]]:
+    """Group segments into as-equal-as-possible word-count chunks.
+
+    Uses prefix sums to find split boundaries closest to ideal equal division,
+    so a 600-word body becomes two ~300-word parts rather than 400+200.
+    """
+    if not segments:
+        return [segments]
+    num_parts = math.ceil(total_words / RAG_CHUNK_WORD_LIMIT)
+    # Can't split into more parts than segments
+    num_parts = min(num_parts, len(segments))
+    if num_parts <= 1:
+        return [segments]
+
+    prefix = [0]
+    for s in segments:
+        prefix.append(prefix[-1] + count_words(s))
+
+    n = len(segments)
+    split_after: list[int] = []  # index of last segment in each completed group
+    for k in range(1, num_parts):
+        ideal = total_words * k / num_parts
+        search_start = (split_after[-1] + 1) if split_after else 0
+        # Leave at least one segment per remaining group; hard-clamp to n-1
+        search_end = n - (num_parts - k) - 1
+        search_end = min(max(search_end, search_start), n - 1)
+
+        best_i = search_start
+        best_dist = float("inf")
+        for i in range(search_start, search_end + 1):
+            if i + 1 >= len(prefix):
+                break
+            # For the last split point, avoid leaving a tiny orphan tail
+            if k == num_parts - 1:
+                tail = prefix[-1] - prefix[i + 1]
+                if tail < RAG_CHUNK_WORD_MIN:
+                    continue
+            dist = abs(prefix[i + 1] - ideal)
+            if dist < best_dist:
+                best_dist = dist
+                best_i = i
+        split_after.append(best_i)
+
+    groups: list[list[str]] = []
+    prev = 0
+    for after_i in split_after:
+        groups.append(segments[prev: after_i + 1])
+        prev = after_i + 1
+    groups.append(segments[prev:])
+    return [g for g in groups if g]
+
+
+def split_part_file_name(stem: str, order_prefix: str, base_stem: str, part: int, suffix: str) -> str:
+    """Return the part-N filename.
+
+    Part 1 reuses the original order prefix (e.g. 0007_general_instruction_01~p01.txt).
+    Parts 2+ use a fresh order prefix so they sort correctly in the directory.
+    """
+    if part == 1:
+        return f"{stem}~p{part:02d}{suffix}"
+    return f"{order_prefix}_{base_stem}~p{part:02d}{suffix}"
 
 
 def split_display_lines(value: str) -> list[str]:
@@ -643,32 +768,42 @@ def next_order_prefix(order_state: dict[str, int]) -> str:
     return f"{order_state['value']:04d}"
 
 
-def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, str]]) -> str:
+def build_metadata_header(metadata: dict[str, Any]) -> str:
+    """Return the 5-line RAG metadata block (no trailing newline)."""
     section_parts = [
         str(metadata.get("section_arabic") or "").strip(),
         str(metadata.get("section_english") or "").strip(),
     ]
     section_label = " - ".join(part for part in section_parts if part)
-    content_lines = [
+    lines = [
         "--- RAG METADATA ---",
         format_document_header(metadata.get("document_header") or metadata.get("document_name") or ""),
         f"Section: {section_label}",
         f"Hierarchy: {metadata.get('hierarchy_path', '')}",
         "--- END RAG METADATA ---",
-        "",
     ]
+    return "\n".join(lines)
 
+
+def build_content_body(content_blocks: list[tuple[str, str]]) -> str:
+    """Return the content body text (without metadata header)."""
+    lines: list[str] = []
     for label, value in content_blocks:
         clean_label = plain_label(label)
         clean_value = normalize_text_preserving_tables(value)
         if not clean_value:
             continue
         if clean_label:
-            content_lines.append(f"{clean_label}:")
-        content_lines.append(clean_value)
-        content_lines.append("")
+            lines.append(f"{clean_label}:")
+        lines.append(clean_value)
+        lines.append("")
+    return normalize_text_preserving_tables("\n".join(lines))
 
-    content = normalize_text_preserving_tables("\n".join(content_lines))
+
+def build_chunk_text(metadata: dict[str, Any], content_blocks: list[tuple[str, str]]) -> str:
+    header = build_metadata_header(metadata)
+    body = build_content_body(content_blocks)
+    content = normalize_text_preserving_tables(f"{header}\n\n{body}")
     metadata["content_character_count"] = len(content)
     return content + "\n"
 
@@ -745,6 +880,87 @@ def write_chunk(
         "hierarchy_path": metadata["hierarchy_path"],
         "content_character_count": metadata["content_character_count"],
     }
+
+
+def write_chunk_split(
+    *,
+    output_dir: Path,
+    output_file_name: str,
+    metadata: dict[str, Any],
+    content_blocks: list[tuple[str, str]],
+    used_names: set[str],
+    order_state: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Write one or more chunk files, splitting content if it exceeds RAG_CHUNK_WORD_MAX.
+
+    Splits are as equal as possible (e.g. 600 words → 300+300, not 400+200).
+    Each part receives the full metadata header.
+    When split occurs:
+      - Part 1 keeps the original order prefix and gains a ~p01 suffix.
+      - Parts 2+ receive new sequential order prefixes from order_state and ~p02, ~p03, etc.
+    Un-split files are written under the original name with no suffix.
+    """
+    header = build_metadata_header(metadata)
+    body = build_content_body(content_blocks)
+
+    def _make_record(fname: str, text: str, meta: dict[str, Any]) -> dict[str, Any]:
+        meta["content_character_count"] = len(text) - 1  # exclude trailing \n
+        (output_dir / fname).write_text(text, encoding="utf-8")
+        return {
+            "chunk_id": meta["chunk_id"],
+            "file_name": fname,
+            "file_path": str(output_dir / fname),
+            "section_id": meta["section_id"],
+            "chunk_type": meta["chunk_type"],
+            "hierarchy_path": meta["hierarchy_path"],
+            "content_character_count": meta["content_character_count"],
+        }
+
+    total_words = count_words(body)
+    if total_words <= RAG_CHUNK_WORD_MAX:
+        full_text = normalize_text_preserving_tables(f"{header}\n\n{body}") + "\n"
+        return [_make_record(output_file_name, full_text, metadata)]
+
+    segments = parse_content_segments(body)
+    groups = _compute_split_groups(segments, total_words)
+
+    if len(groups) <= 1:
+        # Single unsplittable block (e.g. one giant table) — emit as-is
+        full_text = normalize_text_preserving_tables(f"{header}\n\n{body}") + "\n"
+        return [_make_record(output_file_name, full_text, metadata)]
+
+    # Decompose the original filename: "NNNN_base_stem.txt"
+    p_orig = Path(output_file_name)
+    suffix = p_orig.suffix
+    orig_stem = p_orig.stem                             # e.g. "0007_general_instruction_01"
+    base_stem = re.sub(r"^\d{4}_", "", orig_stem)      # e.g. "general_instruction_01"
+
+    records: list[dict[str, Any]] = []
+    for part_index, group in enumerate(groups):
+        part_num = part_index + 1   # 1-based part number
+        part_content = "\n\n".join(group)
+
+        if part_index == 0:
+            # Part 1 reuses the original order prefix, gains ~p01 suffix
+            fname = split_part_file_name(orig_stem, "", base_stem, part_num, suffix)
+        else:
+            # Parts 2+ claim a fresh order prefix so they sort after part 1
+            new_order = next_order_prefix(order_state)
+            fname = split_part_file_name(orig_stem, new_order, base_stem, part_num, suffix)
+
+        while fname in used_names:
+            # Defensive: shouldn't happen but handle gracefully
+            new_order = next_order_prefix(order_state)
+            fname = split_part_file_name(orig_stem, new_order, base_stem, part_num, suffix)
+        used_names.add(fname)
+
+        part_meta = dict(metadata)
+        part_meta["chunk_id"] = Path(fname).stem
+        part_meta["output_file_name"] = fname
+        full_text = normalize_text_preserving_tables(f"{header}\n\n{part_content}") + "\n"
+        records.append(_make_record(fname, full_text, part_meta))
+
+    return records
 
 
 def unique_file_name(candidate: str, used_names: set[str]) -> str:
@@ -986,12 +1202,14 @@ def export_workflow_entries(
                 resolved_values=[resolved],
                 document_header=document_header,
             )
-            chunks.append(
-                write_chunk(
+            chunks.extend(
+                write_chunk_split(
                     output_dir=output_dir,
                     output_file_name=file_name,
                     metadata=metadata,
                     content_blocks=[("Content", resolved.text)],
+                    used_names=used_names,
+                    order_state=order_state,
                 )
             )
             continue
@@ -1025,12 +1243,14 @@ def export_workflow_entries(
             resolved_values=[resolved for _, resolved in field_values],
             document_header=document_header,
         )
-        chunks.append(
-            write_chunk(
+        chunks.extend(
+            write_chunk_split(
                 output_dir=output_dir,
                 output_file_name=file_name,
                 metadata=metadata,
                 content_blocks=[(label, resolved.text) for label, resolved in field_values],
+                used_names=used_names,
+                order_state=order_state,
             )
         )
     return chunks
@@ -1127,12 +1347,14 @@ def export_general_instruction_entries(
                 document_header=document_header,
             )
             label = heading if heading else "Instruction"
-            chunks.append(
-                write_chunk(
+            chunks.extend(
+                write_chunk_split(
                     output_dir=output_dir,
                     output_file_name=file_name,
                     metadata=metadata,
                     content_blocks=[(label, resolved.text)],
+                    used_names=used_names,
+                    order_state=order_state,
                 )
             )
     return chunks
@@ -1172,14 +1394,14 @@ def export_rows_or_content(
         resolved_values=resolved_values,
         document_header=document_header,
     )
-    return [
-        write_chunk(
-            output_dir=output_dir,
-            output_file_name=file_name,
-            metadata=metadata,
-            content_blocks=content_blocks,
-        )
-    ]
+    return write_chunk_split(
+        output_dir=output_dir,
+        output_file_name=file_name,
+        metadata=metadata,
+        content_blocks=content_blocks,
+        used_names=used_names,
+        order_state=order_state,
+    )
 
 
 def reset_output_dir(output_dir: Path) -> None:
