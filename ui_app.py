@@ -2768,7 +2768,9 @@ def _filter_section_entries_for_hierarchy(
 
     target_header_titles is the ordered list of normalized header headings
     derived from the hierarchy_path after stripping the section name prefix.
-    An empty list means no sub-hierarchy — all entries are returned as-is.
+    An empty list means the RAG chunk is at the top level of the section
+    (not inside any group/subgroup header), so only top-level entries are
+    returned — entries nested under a group header are excluded.
 
     Two structural patterns are handled:
     • Workflow sections (SEC12/13): group_header/subgroup_header are pure
@@ -2778,8 +2780,6 @@ def _filter_section_entries_for_hierarchy(
       When the subsection heading matches the final target level, the entry
       itself is included directly so the renderer shows its content.
     """
-    if not target_header_titles:
-        return list(entries)
 
     normalized_target = [_normalize_heading(h) for h in target_header_titles]
     result: list[dict[str, Any]] = []
