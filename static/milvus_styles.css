@@ -403,6 +403,23 @@ body.milvus-page {
   border-color: rgba(0,179,152,.18);
 }
 
+.milvus-hit-card-stitched {
+  background: linear-gradient(180deg, rgba(0,147,201,.07), rgba(255,255,255,.98));
+  border-color: rgba(0,147,201,.22);
+}
+
+.milvus-stitch-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: white;
+  background: linear-gradient(135deg, var(--cbo-sky), var(--cbo-blue));
+}
+
 .milvus-hit-head,
 .milvus-chip-row {
   display: flex;

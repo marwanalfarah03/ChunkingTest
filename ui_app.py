@@ -2584,6 +2584,109 @@ def api_milvus_ingest() -> Response:
     return jsonify({"job_id": job_id})
 
 
+_SPLIT_PART_STEM_RE = re.compile(r"^(\d{4}_)?(.+?)(~p\d{2})$")
+_SPLIT_PART_NUM_RE = re.compile(r"~p(\d+)")
+_METADATA_END_MARKER = "--- END RAG METADATA ---"
+
+
+def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stitch split ~pNN parts back into full documents for display.
+
+    When a reranker result's file_name contains '~p', all sibling parts
+    (from ~p01 to the last) are read from disk and joined into one record
+    with a single metadata header.  Non-split hits pass through unchanged.
+    Multiple hits from the same split group are deduplicated (highest
+    reranker score wins for ordering).  Output is sorted best-first.
+    """
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    non_split: list[dict[str, Any]] = []
+
+    for doc in reranked_documents:
+        file_name = str(doc.get("file_name") or "")
+        stem = Path(file_name).stem
+        m = _SPLIT_PART_STEM_RE.match(stem)
+        if not m:
+            non_split.append(doc)
+            continue
+
+        base_stem = m.group(2)          # e.g. "general_instruction_01"
+        document_id = str(doc.get("document_id") or "")
+        key = (document_id, base_stem)
+        score = float(doc.get("reranker_score") or float("-inf"))
+
+        if key not in groups:
+            groups[key] = {
+                "document_id": document_id,
+                "document_name": doc.get("document_name") or "",
+                "section_id": doc.get("section_id") or "",
+                "chunk_type": doc.get("chunk_type") or "",
+                "hierarchy_path": doc.get("hierarchy_path") or "",
+                "base_stem": base_stem,
+                "best_reranker_score": doc.get("reranker_score"),
+                "best_milvus_score": doc.get("milvus_score"),
+                "_sort_score": score,
+            }
+        else:
+            if score > groups[key]["_sort_score"]:
+                groups[key]["best_reranker_score"] = doc.get("reranker_score")
+                groups[key]["_sort_score"] = score
+            ms = doc.get("milvus_score")
+            if ms is not None and (groups[key]["best_milvus_score"] is None or ms > groups[key]["best_milvus_score"]):
+                groups[key]["best_milvus_score"] = ms
+
+    stitched: list[dict[str, Any]] = []
+    part_file_pattern = re.compile(r"^\d{4}_(.+?)~p(\d+)$")
+
+    for (document_id, base_stem), group in groups.items():
+        doc_path = doc_id_to_path(document_id)
+        if doc_path is None:
+            continue
+        rag_dir = doc_path / "rag_txt"
+        if not rag_dir.is_dir():
+            continue
+
+        part_files: list[tuple[int, Path]] = []
+        for f in rag_dir.iterdir():
+            if f.suffix.lower() != ".txt":
+                continue
+            pm = part_file_pattern.match(f.stem)
+            if pm and pm.group(1) == base_stem:
+                part_files.append((int(pm.group(2)), f))
+
+        if not part_files:
+            continue
+        part_files.sort(key=lambda x: x[0])
+
+        text_parts: list[str] = []
+        for idx, (_, f) in enumerate(part_files):
+            raw = f.read_text(encoding="utf-8").strip()
+            if idx == 0:
+                text_parts.append(raw)
+            else:
+                marker_pos = raw.find(_METADATA_END_MARKER)
+                content = raw[marker_pos + len(_METADATA_END_MARKER):].lstrip("\n") if marker_pos != -1 else raw
+                if content:
+                    text_parts.append(content)
+
+        stitched.append({
+            "document_id": document_id,
+            "document_name": group["document_name"],
+            "section_id": group["section_id"],
+            "chunk_type": group["chunk_type"],
+            "hierarchy_path": group["hierarchy_path"],
+            "base_stem": base_stem,
+            "file_name": f"{base_stem}~stitched",
+            "part_count": len(part_files),
+            "text": "\n\n".join(text_parts),
+            "reranker_score": group["best_reranker_score"],
+            "milvus_score": group["best_milvus_score"],
+        })
+
+    result = non_split + stitched
+    result.sort(key=lambda x: float(x.get("reranker_score") or float("-inf")), reverse=True)
+    return result
+
+
 @app.post("/api/milvus/query")
 def api_milvus_query() -> Response:
     body = request.get_json(force=True, silent=True) or {}
@@ -2606,6 +2709,7 @@ def api_milvus_query() -> Response:
         return jsonify({"error": repair_text(exc)}), 400
     except Exception as exc:
         return jsonify({"error": repair_text(exc)}), 500
+    payload["stitched_documents"] = stitch_reranked_documents(payload.get("reranked_documents") or [])
     return jsonify(payload)
 
 

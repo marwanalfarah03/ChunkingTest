@@ -24,6 +24,7 @@ const progressDetail = milvusEl('milvusProgressDetail');
 const stepList = milvusEl('milvusStepList');
 const messageLog = milvusEl('milvusMessageLog');
 const hitsContainer = milvusEl('milvusHits');
+const stitchedContainer = milvusEl('milvusStitchedDocs');
 const rerankedContainer = milvusEl('milvusRerankedDocs');
 const summaryCard = milvusEl('milvusSummaryCard');
 const resetButton = milvusEl('milvusResetButton');
@@ -220,6 +221,38 @@ function renderMilvusHits(hits = []) {
   `).join('');
 }
 
+function renderStitchedDocs(documents = []) {
+  if (!documents.length) {
+    stitchedContainer.innerHTML = '<div class="milvus-empty">No split parts were returned by the reranker.</div>';
+    return;
+  }
+  stitchedContainer.innerHTML = documents.map((doc, index) => {
+    const partLabel = doc.part_count > 1 ? `${doc.part_count} parts stitched` : '1 part';
+    const scoreHtml = doc.reranker_score != null
+      ? `<span class="milvus-score-pill">${Number(doc.reranker_score).toFixed(4)}</span>`
+      : '';
+    // Strip the metadata header block from the display text so it isn't doubled
+    let displayText = doc.text || '';
+    const markerEnd = displayText.indexOf('--- END RAG METADATA ---');
+    if (markerEnd !== -1) displayText = displayText.slice(markerEnd + '--- END RAG METADATA ---'.length).trimStart();
+    return `
+    <article class="milvus-hit-card milvus-hit-card-stitched">
+      <div class="milvus-hit-head">
+        <span class="milvus-rank-pill">#${index + 1}</span>
+        ${scoreHtml}
+        <span class="milvus-stitch-pill">${escapeHtml(partLabel)}</span>
+      </div>
+      <h4 ${dirAttrs(doc.document_name || '')}>${escapeHtml(doc.document_name || 'Unknown document')}</h4>
+      <div class="milvus-chip-row">
+        <span class="milvus-chip">${escapeHtml(doc.base_stem || doc.file_name || '')}</span>
+        <span class="milvus-chip">${escapeHtml(doc.section_id || 'No section')}</span>
+      </div>
+      <p class="milvus-hit-path" ${dirAttrs(doc.hierarchy_path || '')}>${escapeHtml(doc.hierarchy_path || 'No hierarchy path')}</p>
+      <div class="milvus-hit-text" ${dirAttrs(displayText)}>${escapeHtml(displayText)}</div>
+    </article>`;
+  }).join('');
+}
+
 function renderRerankedDocs(documents = []) {
   if (!documents.length) {
     rerankedContainer.innerHTML = '<div class="milvus-empty">No reranked documents to display.</div>';
@@ -337,6 +370,7 @@ queryForm.addEventListener('submit', async (event) => {
       }),
     });
     renderMilvusHits(payload.milvus_hits || []);
+    renderStitchedDocs(payload.stitched_documents || []);
     renderRerankedDocs(payload.reranked_documents || []);
   } catch (error) {
     queryError.textContent = error.message || 'The retrieval request failed.';
