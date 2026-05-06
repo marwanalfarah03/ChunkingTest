@@ -62,9 +62,19 @@ TB_TOKEN_RE = re.compile(r"<TB\d{6}>")
 EM_TOKEN_RE = re.compile(r"<EM\d{6}>")
 REFERENCE_TOKEN_RE = re.compile(r"(CL\d{6}|<TB\d{6}>|<EM\d{6}>)")
 COLOR_TOKEN_RE = re.compile(r"\s*\[#([0-9A-Fa-f]{6})\]\s*")
+HL_TAG_RE = re.compile(r"<HL:([^>]+)>(.*?)</HL>", re.DOTALL)
 HTML_TAG_RE = re.compile(r"</?[^>]+>")
 INVISIBLE_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060\ufeff]")
 UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def _normalize_hl_tag(m: re.Match) -> str:
+    url = html.unescape(m.group(1)).strip()
+    inner = HTML_TAG_RE.sub("", m.group(2))
+    inner = html.unescape(inner)
+    inner = INVISIBLE_CHARS_RE.sub("", inner)
+    inner = normalize_text(inner)
+    return f"<HL:{url}>{inner}</HL>" if inner else f"<HL:{url}></HL>"
 
 
 def workflow_entry_level(entry: dict[str, Any]) -> int | None:
@@ -110,9 +120,35 @@ def repair_text(value: Any) -> str:
     return best.replace("\uf0b7", "-").replace("\uf0a7", "-").replace("\u00a0", " ")
 
 
+def _hl_tag_to_markdown(m: re.Match) -> str:
+    url = html.unescape(m.group(1))
+    inner = HTML_TAG_RE.sub("", m.group(2)).strip()
+    return f"[{inner}]({url})" if inner else url
+
+
+def plain_content(value: Any) -> str:
+    text = repair_text(value)
+    text = COLOR_TOKEN_RE.sub(" ", text)
+    preserved_links: list[str] = []
+
+    def stash_hl_tag(m: re.Match) -> str:
+        preserved_links.append(_normalize_hl_tag(m))
+        return f"__HL_TOKEN_{len(preserved_links) - 1}__"
+
+    text = HL_TAG_RE.sub(stash_hl_tag, text)
+    text = HTML_TAG_RE.sub("", text)
+    text = html.unescape(text)
+    text = INVISIBLE_CHARS_RE.sub("", text)
+    text = normalize_text_preserving_indentation(text)
+    for index, preserved in enumerate(preserved_links):
+        text = text.replace(f"__HL_TOKEN_{index}__", preserved)
+    return text
+
+
 def plain_label(value: Any) -> str:
     text = repair_text(value)
     text = COLOR_TOKEN_RE.sub(" ", text)
+    text = HL_TAG_RE.sub(_hl_tag_to_markdown, text)
     text = HTML_TAG_RE.sub("", text)
     text = html.unescape(text)
     text = INVISIBLE_CHARS_RE.sub("", text)
@@ -135,6 +171,25 @@ def normalize_text(value: str) -> str:
     return "\n".join(compacted).strip()
 
 
+def normalize_text_preserving_indentation(value: str) -> str:
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    compacted: list[str] = []
+    previous_blank = False
+    for line in text.split("\n"):
+        if not line.strip():
+            if not previous_blank and compacted:
+                compacted.append("")
+            previous_blank = True
+            continue
+
+        leading_length = len(line) - len(line.lstrip(" \t"))
+        leading = line[:leading_length]
+        cleaned = re.sub(r"[ \t]+", " ", line[leading_length:]).rstrip()
+        compacted.append(f"{leading}{cleaned}" if cleaned else leading.rstrip())
+        previous_blank = False
+    return "\n".join(compacted).strip("\n")
+
+
 def is_grid_table_line(line: str) -> bool:
     stripped = line.rstrip()
     return len(stripped) >= 2 and (
@@ -153,15 +208,18 @@ def normalize_text_preserving_tables(value: str) -> str:
             previous_blank = False
             continue
 
-        cleaned = re.sub(r"[ \t]+", " ", line).strip()
-        if not cleaned:
+        if not line.strip():
             if not previous_blank and compacted:
                 compacted.append("")
             previous_blank = True
             continue
-        compacted.append(cleaned)
+
+        leading_length = len(line) - len(line.lstrip(" \t"))
+        leading = line[:leading_length]
+        cleaned = re.sub(r"[ \t]+", " ", line[leading_length:]).rstrip()
+        compacted.append(f"{leading}{cleaned}" if cleaned else leading.rstrip())
         previous_blank = False
-    return "\n".join(compacted).strip()
+    return "\n".join(compacted).strip("\n")
 
 
 def split_display_lines(value: str) -> list[str]:
@@ -288,7 +346,7 @@ class PlainTextResolver:
                 if resolved.text:
                     text_parts.append(resolved.text)
             else:
-                cleaned = plain_label(part)
+                cleaned = plain_content(part)
                 if cleaned:
                     text_parts.append(cleaned)
         result.text = normalize_text_preserving_tables("\n".join(text_parts))
