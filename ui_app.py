@@ -2631,6 +2631,7 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
         key = (document_id, *meta)
         score = float(doc.get("reranker_score") or float("-inf"))
 
+        fname = str(doc.get("file_name") or "")
         if key not in groups:
             groups[key] = {
                 "document_id": document_id,
@@ -2641,6 +2642,7 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
                 "best_reranker_score": doc.get("reranker_score"),
                 "best_milvus_score": doc.get("milvus_score"),
                 "_sort_score": score,
+                "retrieved_file_names": [fname] if fname else [],
             }
         else:
             if score > groups[key]["_sort_score"]:
@@ -2652,6 +2654,8 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
                 or ms > groups[key]["best_milvus_score"]
             ):
                 groups[key]["best_milvus_score"] = ms
+            if fname and fname not in groups[key]["retrieved_file_names"]:
+                groups[key]["retrieved_file_names"].append(fname)
 
     # Step 2 — for each unique document_id scan its rag_txt/ dir once and
     # build a metadata-key → [(order, path, raw_text)] index
@@ -2703,17 +2707,13 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
                 if content:
                     text_parts.append(content)
 
-        # Display name: first file's stem with ~pNN stripped
-        first_stem = file_list[0][1].stem
-        display_name = re.sub(r"~p\d+$", "", first_stem)
-
         stitched.append({
             "document_id": document_id,
             "document_name": group["document_name"],
             "section_id": group["section_id"],
             "chunk_type": group["chunk_type"],
             "hierarchy_path": group["hierarchy_path"],
-            "file_name": display_name,
+            "retrieved_file_names": group["retrieved_file_names"],
             "part_count": len(file_list),
             "text": "\n\n".join(text_parts),
             "reranker_score": group["best_reranker_score"],

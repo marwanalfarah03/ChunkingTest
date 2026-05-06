@@ -35,9 +35,10 @@ body.milvus-page {
 }
 
 .milvus-main {
-  padding: 32px;
+  padding: 24px;
   display: grid;
-  gap: 24px;
+  gap: 12px;
+  align-content: start;
 }
 
 .milvus-card,
@@ -360,9 +361,67 @@ body.milvus-page {
   flex-wrap: wrap;
 }
 
+.milvus-query-panel {
+  align-self: start;  /* prevent grid from stretching the card taller than its content */
+}
+
+.milvus-query-panel > .eyebrow {
+  margin: 0 0 12px;
+}
+
+.milvus-query-panel .form-error:empty {
+  display: none;      /* collapse the error paragraph when there is no message */
+}
+
 .milvus-query-form {
   display: grid;
-  gap: 16px;
+  gap: 10px;
+}
+
+.milvus-query-form textarea {
+  font-family: inherit;
+  font-size: 15px;
+  min-height: 100px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.milvus-retrieve-btn {
+  width: 100%;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-size: 15px;
+  border-radius: 14px;
+}
+
+/* Collapsible K/N settings */
+.milvus-retrieval-settings {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.milvus-retrieval-settings > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(24,38,50,.55);
+}
+.milvus-retrieval-settings > summary::-webkit-details-marker { display: none; }
+.milvus-retrieval-settings > summary::before {
+  content: '▶  ';
+  font-size: 9px;
+  transition: transform .18s;
+  display: inline-block;
+}
+.milvus-retrieval-settings[open] > summary::before { transform: rotate(90deg); }
+.milvus-retrieval-settings > .milvus-settings-grid {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
 }
 
 .milvus-query-grid {
@@ -386,6 +445,61 @@ body.milvus-page {
 .milvus-result-head {
   margin-bottom: 12px;
 }
+
+/* Panel-level collapse (result panels) */
+.milvus-panel-details {
+  display: block;
+}
+.milvus-panel-details > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.milvus-panel-details > summary::-webkit-details-marker { display: none; }
+.milvus-panel-details > summary.milvus-result-head { margin-bottom: 0; }
+.milvus-panel-details[open] > summary.milvus-result-head { margin-bottom: 12px; }
+
+/* Ingest panel collapse */
+.milvus-ingest-details {
+  align-self: start;
+}
+
+.milvus-ingest-details > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.milvus-ingest-details > summary::-webkit-details-marker { display: none; }
+.milvus-ingest-details > summary.milvus-panel-head { margin-bottom: 0; }
+.milvus-ingest-details[open] > summary.milvus-panel-head { margin-bottom: 18px; }
+.milvus-ingest-details[open] > form { margin-top: 0; }
+.milvus-ingest-summary-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Shared collapse toggle arrow */
+.milvus-panel-toggle {
+  font-size: 11px;
+  color: rgba(24,38,50,.4);
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+.milvus-panel-toggle::before { content: '▶'; }
+.milvus-panel-details[open] .milvus-panel-toggle,
+.milvus-ingest-details[open] .milvus-panel-toggle { transform: rotate(90deg); }
+
+/* Item-level collapse */
+.milvus-hit-collapsible { cursor: default; }
+.milvus-hit-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: block;
+}
+.milvus-hit-summary::-webkit-details-marker { display: none; }
+.milvus-hit-body { margin-top: 12px; }
 
 .milvus-hit-list {
   min-height: 180px;

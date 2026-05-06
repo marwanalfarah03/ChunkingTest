@@ -22,12 +22,10 @@ const progressPercent = milvusEl('milvusProgressPercent');
 const progressBar = milvusEl('milvusProgressBar');
 const progressDetail = milvusEl('milvusProgressDetail');
 const stepList = milvusEl('milvusStepList');
-const messageLog = milvusEl('milvusMessageLog');
 const hitsContainer = milvusEl('milvusHits');
 const stitchedContainer = milvusEl('milvusStitchedDocs');
 const rerankedContainer = milvusEl('milvusRerankedDocs');
 const summaryCard = milvusEl('milvusSummaryCard');
-const resetButton = milvusEl('milvusResetButton');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -98,15 +96,6 @@ function renderProgress(snapshot) {
   progressDetail.textContent = progress.detail || 'Ready';
 }
 
-function renderMessages(messages = []) {
-  if (!messages.length) {
-    messageLog.innerHTML = '<div class="milvus-empty milvus-empty-inline">No ingestion activity yet.</div>';
-    return;
-  }
-  messageLog.innerHTML = messages.slice(-14).reverse().map((entry) => `
-    <div ${dirAttrs(entry.message || '', `message-item ${entry.kind || 'info'}`)}>${escapeHtml(entry.message || '')}</div>
-  `).join('');
-}
 
 function renderSummary(result) {
   if (!result) {
@@ -205,19 +194,23 @@ function renderMilvusHits(hits = []) {
     return;
   }
   hitsContainer.innerHTML = hits.map((hit) => `
-    <article class="milvus-hit-card">
-      <div class="milvus-hit-head">
-        <span class="milvus-rank-pill">#${escapeHtml(hit.rank)}</span>
-        <span class="milvus-score-pill">${Number(hit.milvus_score || 0).toFixed(4)}</span>
+    <details class="milvus-hit-card milvus-hit-collapsible">
+      <summary class="milvus-hit-summary">
+        <div class="milvus-hit-head">
+          <span class="milvus-rank-pill">#${escapeHtml(hit.rank)}</span>
+          <span class="milvus-score-pill">${Number(hit.milvus_score || 0).toFixed(4)}</span>
+        </div>
+        <h4 ${dirAttrs(hit.document_name || '')}>${escapeHtml(hit.document_name || 'Unknown document')}</h4>
+        <div class="milvus-chip-row">
+          <span class="milvus-chip">${escapeHtml(hit.file_name || '')}</span>
+          <span class="milvus-chip">${escapeHtml(hit.section_id || 'No section')}</span>
+        </div>
+        <p class="milvus-hit-path" ${dirAttrs(hit.hierarchy_path || '')}>${escapeHtml(hit.hierarchy_path || 'No hierarchy path')}</p>
+      </summary>
+      <div class="milvus-hit-body">
+        <div class="milvus-hit-text" ${dirAttrs(hit.text || '')}>${escapeHtml(hit.text || '')}</div>
       </div>
-      <h4 ${dirAttrs(hit.document_name || '')}>${escapeHtml(hit.document_name || 'Unknown document')}</h4>
-      <div class="milvus-chip-row">
-        <span class="milvus-chip">${escapeHtml(hit.file_name || '')}</span>
-        <span class="milvus-chip">${escapeHtml(hit.section_id || 'No section')}</span>
-      </div>
-      <p class="milvus-hit-path" ${dirAttrs(hit.hierarchy_path || '')}>${escapeHtml(hit.hierarchy_path || 'No hierarchy path')}</p>
-      <div class="milvus-hit-text" ${dirAttrs(hit.text || '')}>${escapeHtml(hit.text || '')}</div>
-    </article>
+    </details>
   `).join('');
 }
 
@@ -255,7 +248,7 @@ function renderStitchedDocs(documents = []) {
       </div>
       <h4 ${dirAttrs(doc.document_name || '')}>${escapeHtml(doc.document_name || 'Unknown document')}</h4>
       <div class="milvus-chip-row">
-        <span class="milvus-chip">${escapeHtml(doc.file_name || '')}</span>
+        ${(doc.retrieved_file_names || []).map(fn => `<span class="milvus-chip">${escapeHtml(fn)}</span>`).join('')}
         <span class="milvus-chip">${escapeHtml(doc.section_id || 'No section')}</span>
       </div>
       <p class="milvus-hit-path" ${dirAttrs(doc.hierarchy_path || '')}>${escapeHtml(doc.hierarchy_path || 'No hierarchy path')}</p>
@@ -271,19 +264,23 @@ function renderRerankedDocs(documents = []) {
     return;
   }
   rerankedContainer.innerHTML = documents.map((doc, index) => `
-    <article class="milvus-hit-card milvus-hit-card-accent">
-      <div class="milvus-hit-head">
-        <span class="milvus-rank-pill">#${index + 1}</span>
-        <span class="milvus-score-pill">${Number(doc.reranker_score || 0).toFixed(4)}</span>
+    <details class="milvus-hit-card milvus-hit-card-accent milvus-hit-collapsible">
+      <summary class="milvus-hit-summary">
+        <div class="milvus-hit-head">
+          <span class="milvus-rank-pill">#${index + 1}</span>
+          <span class="milvus-score-pill">${Number(doc.reranker_score || 0).toFixed(4)}</span>
+        </div>
+        <h4 ${dirAttrs(doc.document_name || '')}>${escapeHtml(doc.document_name || 'Unknown document')}</h4>
+        <div class="milvus-chip-row">
+          <span class="milvus-chip">${escapeHtml(doc.file_name || '')}</span>
+          <span class="milvus-chip">Milvus ${Number(doc.milvus_score || 0).toFixed(4)}</span>
+        </div>
+        <p class="milvus-hit-path" ${dirAttrs(doc.hierarchy_path || '')}>${escapeHtml(doc.hierarchy_path || 'No hierarchy path')}</p>
+      </summary>
+      <div class="milvus-hit-body">
+        <div class="milvus-hit-text" ${dirAttrs(doc.text || '')}>${escapeHtml(doc.text || '')}</div>
       </div>
-      <h4 ${dirAttrs(doc.document_name || '')}>${escapeHtml(doc.document_name || 'Unknown document')}</h4>
-      <div class="milvus-chip-row">
-        <span class="milvus-chip">${escapeHtml(doc.file_name || '')}</span>
-        <span class="milvus-chip">Milvus ${Number(doc.milvus_score || 0).toFixed(4)}</span>
-      </div>
-      <p class="milvus-hit-path" ${dirAttrs(doc.hierarchy_path || '')}>${escapeHtml(doc.hierarchy_path || 'No hierarchy path')}</p>
-      <div class="milvus-hit-text" ${dirAttrs(doc.text || '')}>${escapeHtml(doc.text || '')}</div>
-    </article>
+    </details>
   `).join('');
 }
 
@@ -291,12 +288,10 @@ function applySnapshot(snapshot) {
   milvusState.latestJob = snapshot;
   renderSteps(snapshot.steps || []);
   renderProgress(snapshot);
-  renderMessages(snapshot.messages || []);
   renderSummary(snapshot.result || null);
   const isBusy = snapshot.status === 'queued' || snapshot.status === 'running';
   ingestButton.disabled = isBusy;
   ingestButton.textContent = isBusy ? 'Ingestion Running...' : 'Ingest Into Milvus';
-  resetButton.disabled = isBusy;
   if (snapshot.status === 'failed') {
     ingestError.textContent = snapshot.error || 'The ingestion stopped unexpectedly.';
   } else {
@@ -384,6 +379,7 @@ queryForm.addEventListener('submit', async (event) => {
     renderMilvusHits(payload.milvus_hits || []);
     renderStitchedDocs(payload.stitched_documents || []);
     renderRerankedDocs(payload.reranked_documents || []);
+    milvusEl('milvusResultsGrid').classList.remove('hidden');
   } catch (error) {
     queryError.textContent = error.message || 'The retrieval request failed.';
   } finally {
@@ -392,15 +388,7 @@ queryForm.addEventListener('submit', async (event) => {
   }
 });
 
-resetButton.addEventListener('click', async () => {
-  try {
-    await fetchJson('/api/milvus/reset', { method: 'POST' });
-    applySnapshot(await fetchJson('/api/milvus/state'));
-    ingestError.textContent = '';
-  } catch (error) {
-    ingestError.textContent = error.message || 'The Milvus status could not be reset.';
-  }
-});
+
 
 loadDocuments();
 fetchJson('/api/milvus/state').then(applySnapshot).finally(startMilvusEvents);
