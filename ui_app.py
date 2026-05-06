@@ -2584,34 +2584,51 @@ def api_milvus_ingest() -> Response:
     return jsonify({"job_id": job_id})
 
 
-_SPLIT_PART_STEM_RE = re.compile(r"^(\d{4}_)?(.+?)(~p\d{2})$")
-_SPLIT_PART_NUM_RE = re.compile(r"~p(\d+)")
 _METADATA_END_MARKER = "--- END RAG METADATA ---"
+_ORDER_PREFIX_RE = re.compile(r"^(\d{4})")
+
+
+def _parse_rag_metadata_key(text: str) -> tuple[str, str, str]:
+    """Return (document_line, section_line, hierarchy_line) from a RAG txt body."""
+    doc = section = hierarchy = ""
+    in_meta = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "--- RAG METADATA ---":
+            in_meta = True
+            continue
+        if stripped == "--- END RAG METADATA ---":
+            break
+        if in_meta:
+            if stripped.startswith("Document:"):
+                doc = stripped[len("Document:"):].strip()
+            elif stripped.startswith("Section:"):
+                section = stripped[len("Section:"):].strip()
+            elif stripped.startswith("Hierarchy:"):
+                hierarchy = stripped[len("Hierarchy:"):].strip()
+    return doc, section, hierarchy
 
 
 def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Stitch split ~pNN parts back into full documents for display.
+    """Group reranked hits by identical RAG metadata within the same document.
 
-    When a reranker result's file_name contains '~p', all sibling parts
-    (from ~p01 to the last) are read from disk and joined into one record
-    with a single metadata header.  Non-split hits pass through unchanged.
-    Multiple hits from the same split group are deduplicated (highest
-    reranker score wins for ordering).  Output is sorted best-first.
+    For each unique (document_id, Document, Section, Hierarchy) group found in
+    the reranker results, all txt files in that document's rag_txt/ directory
+    that carry the exact same metadata are collected, sorted by their order
+    prefix, and stitched into one entry with a single metadata header.
+    Output is sorted by best reranker score descending.
     """
-    groups: dict[tuple[str, str], dict[str, Any]] = {}
-    non_split: list[dict[str, Any]] = []
+    if not reranked_documents:
+        return []
+
+    # Step 1 — parse each reranked hit's metadata and group by it
+    # key = (document_id, doc_line, section_line, hierarchy_line)
+    groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
 
     for doc in reranked_documents:
-        file_name = str(doc.get("file_name") or "")
-        stem = Path(file_name).stem
-        m = _SPLIT_PART_STEM_RE.match(stem)
-        if not m:
-            non_split.append(doc)
-            continue
-
-        base_stem = m.group(2)          # e.g. "general_instruction_01"
         document_id = str(doc.get("document_id") or "")
-        key = (document_id, base_stem)
+        meta = _parse_rag_metadata_key(str(doc.get("text") or ""))
+        key = (document_id, *meta)
         score = float(doc.get("reranker_score") or float("-inf"))
 
         if key not in groups:
@@ -2621,7 +2638,6 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
                 "section_id": doc.get("section_id") or "",
                 "chunk_type": doc.get("chunk_type") or "",
                 "hierarchy_path": doc.get("hierarchy_path") or "",
-                "base_stem": base_stem,
                 "best_reranker_score": doc.get("reranker_score"),
                 "best_milvus_score": doc.get("milvus_score"),
                 "_sort_score": score,
@@ -2631,13 +2647,17 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
                 groups[key]["best_reranker_score"] = doc.get("reranker_score")
                 groups[key]["_sort_score"] = score
             ms = doc.get("milvus_score")
-            if ms is not None and (groups[key]["best_milvus_score"] is None or ms > groups[key]["best_milvus_score"]):
+            if ms is not None and (
+                groups[key]["best_milvus_score"] is None
+                or ms > groups[key]["best_milvus_score"]
+            ):
                 groups[key]["best_milvus_score"] = ms
 
-    stitched: list[dict[str, Any]] = []
-    part_file_pattern = re.compile(r"^\d{4}_(.+?)~p(\d+)$")
+    # Step 2 — for each unique document_id scan its rag_txt/ dir once and
+    # build a metadata-key → [(order, path, raw_text)] index
+    doc_meta_index: dict[str, dict[tuple[str, str, str], list[tuple[str, Path, str]]]] = {}
 
-    for (document_id, base_stem), group in groups.items():
+    for document_id in {key[0] for key in groups}:
         doc_path = doc_id_to_path(document_id)
         if doc_path is None:
             continue
@@ -2645,28 +2665,47 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
         if not rag_dir.is_dir():
             continue
 
-        part_files: list[tuple[int, Path]] = []
+        meta_files: dict[tuple[str, str, str], list[tuple[str, Path, str]]] = {}
         for f in rag_dir.iterdir():
             if f.suffix.lower() != ".txt":
                 continue
-            pm = part_file_pattern.match(f.stem)
-            if pm and pm.group(1) == base_stem:
-                part_files.append((int(pm.group(2)), f))
+            try:
+                raw = f.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            fkey = _parse_rag_metadata_key(raw)
+            m = _ORDER_PREFIX_RE.match(f.stem)
+            order = m.group(1) if m else f.stem
+            meta_files.setdefault(fkey, []).append((order, f, raw))
 
-        if not part_files:
+        for fkey in meta_files:
+            meta_files[fkey].sort(key=lambda x: x[0])
+
+        doc_meta_index[document_id] = meta_files
+
+    # Step 3 — stitch each group
+    stitched: list[dict[str, Any]] = []
+
+    for (document_id, doc_line, section_line, hierarchy_line), group in groups.items():
+        fkey = (doc_line, section_line, hierarchy_line)
+        file_list = doc_meta_index.get(document_id, {}).get(fkey, [])
+        if not file_list:
             continue
-        part_files.sort(key=lambda x: x[0])
 
         text_parts: list[str] = []
-        for idx, (_, f) in enumerate(part_files):
-            raw = f.read_text(encoding="utf-8").strip()
+        for idx, (_, f, raw) in enumerate(file_list):
+            raw = raw.strip()
             if idx == 0:
                 text_parts.append(raw)
             else:
-                marker_pos = raw.find(_METADATA_END_MARKER)
-                content = raw[marker_pos + len(_METADATA_END_MARKER):].lstrip("\n") if marker_pos != -1 else raw
+                pos = raw.find(_METADATA_END_MARKER)
+                content = raw[pos + len(_METADATA_END_MARKER):].lstrip("\n") if pos != -1 else raw
                 if content:
                     text_parts.append(content)
+
+        # Display name: first file's stem with ~pNN stripped
+        first_stem = file_list[0][1].stem
+        display_name = re.sub(r"~p\d+$", "", first_stem)
 
         stitched.append({
             "document_id": document_id,
@@ -2674,17 +2713,15 @@ def stitch_reranked_documents(reranked_documents: list[dict[str, Any]]) -> list[
             "section_id": group["section_id"],
             "chunk_type": group["chunk_type"],
             "hierarchy_path": group["hierarchy_path"],
-            "base_stem": base_stem,
-            "file_name": f"{base_stem}~stitched",
-            "part_count": len(part_files),
+            "file_name": display_name,
+            "part_count": len(file_list),
             "text": "\n\n".join(text_parts),
             "reranker_score": group["best_reranker_score"],
             "milvus_score": group["best_milvus_score"],
         })
 
-    result = non_split + stitched
-    result.sort(key=lambda x: float(x.get("reranker_score") or float("-inf")), reverse=True)
-    return result
+    stitched.sort(key=lambda x: float(x.get("reranker_score") or float("-inf")), reverse=True)
+    return stitched
 
 
 @app.post("/api/milvus/query")
