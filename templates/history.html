@@ -19,12 +19,24 @@
             <p>Capital Bank</p>
             <h1>SOP Builder</h1>
           </div>
+          <a href="/" class="history-nav-btn hist-builder-nav-btn" title="Back to builder" aria-label="Back to builder">&#8592;</a>
         </div>
-        <a href="/" class="hist-back-btn">&#8592; Builder</a>
       </div>
       <div class="hist-sidebar-title">
         <p class="eyebrow">Processed documents</p>
         <span id="docCount" class="hist-doc-count">0 documents</span>
+      </div>
+      <div class="hist-sidebar-controls">
+        <div class="hist-search-wrap">
+          <span class="hist-search-icon">&#x2315;</span>
+          <input type="search" id="docSearch" class="hist-search-input" placeholder="Search documents…" autocomplete="off">
+        </div>
+        <div class="hist-sort-row">
+          <span class="hist-sort-label">Sort</span>
+          <button type="button" class="hist-sort-field-btn active" data-sort-field="date">Date</button>
+          <button type="button" class="hist-sort-field-btn" data-sort-field="alpha">Name</button>
+          <button type="button" class="hist-sort-dir-btn" id="sortDirBtn" title="Toggle sort direction">&#8595;</button>
+        </div>
       </div>
       <div class="hist-sidebar-actions">
         <button type="button" class="hist-rag-btn" id="openRagModalBtn">&#8659; Download RAG TXTs</button>

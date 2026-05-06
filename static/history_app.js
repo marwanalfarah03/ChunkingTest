@@ -43,6 +43,9 @@ const state = {
   loadedLogs: null,
   loadedJsons: null,
   allLogs: [],
+  search: '',
+  sortField: 'date',   // 'date' | 'alpha'
+  sortDir: 'desc',     // 'asc'  | 'desc'
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -79,22 +82,34 @@ histTabs.addEventListener('click', (e) => {
 });
 
 // ── Document list ──────────────────────────────────────────────────────────
-async function loadDocList() {
-  try {
-    state.docs = await fetchJson('/api/history');
-  } catch (err) {
-    docCount.textContent = 'Unavailable';
-    docList.innerHTML = '<div class="hist-empty">History could not be loaded. Refresh the page after the server restarts.</div>';
+function renderDocList() {
+  const needle = state.search.toLowerCase().trim();
+  let visible = needle
+    ? state.docs.filter((d) => d.name.toLowerCase().includes(needle))
+    : state.docs.slice();
+
+  visible.sort((a, b) => {
+    let cmp = 0;
+    if (state.sortField === 'alpha') {
+      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+    } else {
+      cmp = new Date(a.created_at) - new Date(b.created_at); // oldest→newest base
+    }
+    return state.sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  docCount.textContent = state.docs.length === visible.length
+    ? `${state.docs.length} document${state.docs.length !== 1 ? 's' : ''}`
+    : `${visible.length} of ${state.docs.length} document${state.docs.length !== 1 ? 's' : ''}`;
+
+  if (!visible.length) {
+    docList.innerHTML = state.docs.length
+      ? `<div class="hist-empty">No documents match your search.</div>`
+      : `<div class="hist-empty">No processed documents found.<br><a href="/">Process your first document &#8594;</a></div>`;
     return;
   }
-  docCount.textContent = `${state.docs.length} document${state.docs.length !== 1 ? 's' : ''}`;
 
-  if (!state.docs.length) {
-    docList.innerHTML = `<div class="hist-empty">No processed documents found.<br><a href="/">Process your first document &#8594;</a></div>`;
-    return;
-  }
-
-  docList.innerHTML = state.docs.map((doc) => {
+  docList.innerHTML = visible.map((doc) => {
     const date = formatDate(doc.created_at);
     const chunkCount = Number(doc.chunk_count || 0);
     const badges = [
@@ -104,8 +119,9 @@ async function loadDocList() {
       doc.has_assets         && `<span class="hist-badge">Assets</span>`,
       !doc.has_docx          && `<span class="hist-badge warn">Artifacts only</span>`,
     ].filter(Boolean).join('');
+    const isActive = doc.id === state.activeDocId;
     return `
-      <button class="hist-doc-card" data-doc-id="${escHtml(doc.id)}" type="button">
+      <button class="hist-doc-card${isActive ? ' active' : ''}" data-doc-id="${escHtml(doc.id)}" type="button">
         <div class="hist-doc-name" ${dirAttr(doc.name)}>${escHtml(doc.name)}</div>
         <div class="hist-doc-meta">${escHtml(date)} · ${chunkCount} part${chunkCount === 1 ? '' : 's'}</div>
         <div class="hist-doc-badges">${badges}</div>
@@ -113,10 +129,53 @@ async function loadDocList() {
   }).join('');
 }
 
+async function loadDocList() {
+  try {
+    state.docs = await fetchJson('/api/history');
+  } catch (err) {
+    docCount.textContent = 'Unavailable';
+    docList.innerHTML = '<div class="hist-empty">History could not be loaded. Refresh the page after the server restarts.</div>';
+    return;
+  }
+  renderDocList();
+}
+
 docList.addEventListener('click', (e) => {
   const card = e.target.closest('.hist-doc-card');
   if (!card) return;
   selectDoc(card.dataset.docId);
+});
+
+// ── Search & sort controls ─────────────────────────────────────────────────
+const docSearch   = el('docSearch');
+const sortDirBtn  = el('sortDirBtn');
+const sortFieldBtns = document.querySelectorAll('.hist-sort-field-btn');
+
+docSearch.addEventListener('input', () => {
+  state.search = docSearch.value;
+  renderDocList();
+});
+
+sortFieldBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const field = btn.dataset.sortField;
+    if (state.sortField === field) {
+      // clicking the active field flips direction
+      state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      state.sortField = field;
+      state.sortDir = field === 'alpha' ? 'asc' : 'desc';
+    }
+    sortFieldBtns.forEach((b) => b.classList.toggle('active', b.dataset.sortField === state.sortField));
+    sortDirBtn.innerHTML = state.sortDir === 'asc' ? '&#8593;' : '&#8595;';
+    renderDocList();
+  });
+});
+
+sortDirBtn.addEventListener('click', () => {
+  state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+  sortDirBtn.innerHTML = state.sortDir === 'asc' ? '&#8593;' : '&#8595;';
+  renderDocList();
 });
 
 async function selectDoc(docId) {
