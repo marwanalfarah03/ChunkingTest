@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Milvus Workspace — CBOJ SOP Builder</title>
+  <link rel="stylesheet" href="{{ static_asset_url('ui_styles.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('milvus_styles.css') }}">
+</head>
+<body class="milvus-page">
+  <div class="milvus-shell">
+    <aside class="milvus-sidebar">
+      <div class="brand-card milvus-brand-card">
+        <div class="brand-mark">CB</div>
+        <div>
+          <p>Capital Bank</p>
+          <h1>Milvus Lab</h1>
+        </div>
+        <div class="brand-nav-row">
+          <a href="/" class="history-nav-btn" title="Back to builder" aria-label="Back to builder">&#8592;</a>
+          <a href="/history" class="history-nav-btn" title="Open history" aria-label="Open history">&#128196;</a>
+        </div>
+      </div>
+
+      <div class="progress-card milvus-progress-card">
+        <div class="progress-meta">
+          <span id="milvusPhaseLabel">Ready</span>
+          <strong id="milvusProgressPercent">0%</strong>
+        </div>
+        <div class="progress-track"><div id="milvusProgressBar" class="progress-bar"></div></div>
+        <p id="milvusProgressDetail">Choose documents, name a collection, and ingest into Milvus.</p>
+      </div>
+
+      <ol id="milvusStepList" class="step-list"></ol>
+
+      <div class="milvus-sidebar-card">
+        <div class="milvus-sidebar-headline">
+          <p class="eyebrow">Live activity</p>
+          <button id="milvusResetButton" class="secondary-button milvus-mini-button" type="button">Clear</button>
+        </div>
+        <div id="milvusMessageLog" class="message-log milvus-message-log"></div>
+      </div>
+    </aside>
+
+    <main class="milvus-main">
+      <section class="milvus-hero milvus-card">
+        <div>
+          <p class="eyebrow">Vector ingestion workspace</p>
+          <h2>Rebuild a Milvus collection from the generated RAG TXTs and test retrieval immediately.</h2>
+          <p>Each selected document contributes its existing <strong>rag_txt</strong> files. The page validates every TXT before ingestion, recreates the target collection when you run it again, and shows both the raw Milvus hits and the reranked document view.</p>
+        </div>
+        <div class="milvus-model-grid">
+          <div>
+            <span>Embedding</span>
+            <strong>{{ default_embedding_model }}</strong>
+          </div>
+          <div>
+            <span>Reranker</span>
+            <strong>{{ default_reranker_model }}</strong>
+          </div>
+        </div>
+      </section>
+
+      {% if dependency_error %}
+      <section class="milvus-banner milvus-banner-error">
+        <strong>Dependencies are missing.</strong>
+        <span>{{ dependency_error }}</span>
+      </section>
+      {% endif %}
+
+      <section class="milvus-grid">
+        <form id="milvusIngestForm" class="milvus-card milvus-panel" autocomplete="off">
+          <div class="milvus-panel-head">
+            <div>
+              <p class="eyebrow">Ingestion</p>
+              <h3>Choose documents and collection settings</h3>
+            </div>
+            <div class="milvus-count-chip" id="milvusSelectionCount">0 selected</div>
+          </div>
+
+          <div class="milvus-settings-grid">
+            <label>Collection name
+              <input id="collectionName" name="collection_name" value="cboj_sops" maxlength="255" required>
+            </label>
+            <label>Milvus URI
+              <input id="milvusUri" name="milvus_uri" value="{{ default_milvus_uri }}" required>
+            </label>
+            <label>Database name
+              <input id="milvusDbName" name="milvus_db_name" value="{{ default_milvus_db_name }}">
+            </label>
+            <label>Milvus token
+              <input id="milvusToken" name="milvus_token" type="password" placeholder="Optional">
+            </label>
+            <label>Embedding model
+              <input value="{{ default_embedding_model }}" readonly>
+            </label>
+            <label>Reranker model
+              <input value="{{ default_reranker_model }}" readonly>
+            </label>
+          </div>
+
+          <div class="milvus-doc-toolbar">
+            <div class="milvus-search-wrap">
+              <span>&#x2315;</span>
+              <input id="milvusDocSearch" type="search" placeholder="Search documents…" autocomplete="off">
+            </div>
+            <div class="milvus-toolbar-actions">
+              <button id="milvusSelectAll" class="secondary-button milvus-mini-button" type="button">Select all</button>
+              <button id="milvusClearAll" class="secondary-button milvus-mini-button" type="button">Clear all</button>
+            </div>
+          </div>
+
+          <div id="milvusDocList" class="milvus-doc-list">
+            <div class="milvus-empty">Loading documents…</div>
+          </div>
+
+          <div class="milvus-panel-footer">
+            <p id="milvusIngestError" class="form-error"></p>
+            <button id="milvusIngestButton" class="primary-button" type="submit">Ingest Into Milvus</button>
+          </div>
+        </form>
+
+        <section class="milvus-card milvus-panel">
+          <div class="milvus-panel-head">
+            <div>
+              <p class="eyebrow">Retrieval</p>
+              <h3>Ask a question against the collection</h3>
+            </div>
+          </div>
+
+          <form id="milvusQueryForm" class="milvus-query-form" autocomplete="off">
+            <label>Question
+              <textarea id="milvusQuestion" name="question" rows="7" placeholder="Ask the retrieval system what you want to find…" required></textarea>
+            </label>
+            <div class="milvus-settings-grid milvus-query-grid">
+              <label>Top K from Milvus
+                <input id="milvusTopK" name="top_k" type="number" min="1" value="{{ default_top_k }}" required>
+              </label>
+              <label>Top N after reranker
+                <input id="milvusTopN" name="top_n" type="number" min="1" value="{{ default_top_n }}" required>
+              </label>
+            </div>
+            <p id="milvusQueryError" class="form-error"></p>
+            <button id="milvusQueryButton" class="primary-button" type="submit">Retrieve</button>
+          </form>
+
+          <div id="milvusSummaryCard" class="milvus-summary-card hidden"></div>
+        </section>
+      </section>
+
+      <section class="milvus-results-grid">
+        <article class="milvus-card milvus-result-panel">
+          <div class="milvus-result-head">
+            <div>
+              <p class="eyebrow">Top K</p>
+              <h3>Milvus chunks</h3>
+            </div>
+          </div>
+          <div id="milvusHits" class="milvus-hit-list">
+            <div class="milvus-empty">Run a query to inspect the top Milvus chunk hits.</div>
+          </div>
+        </article>
+
+        <article class="milvus-card milvus-result-panel">
+          <div class="milvus-result-head">
+            <div>
+              <p class="eyebrow">Top N</p>
+              <h3>Reranked documents</h3>
+            </div>
+          </div>
+          <div id="milvusRerankedDocs" class="milvus-hit-list">
+            <div class="milvus-empty">The reranker view will appear here after retrieval.</div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ static_asset_url('milvus_app.js') }}"></script>
+</body>
+</html>

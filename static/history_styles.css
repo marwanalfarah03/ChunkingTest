@@ -166,6 +166,13 @@ body.history-page .final-doc-header p {
 .hist-welcome h2 { margin: 0; font-size: 32px; color: var(--cbo-blue); }
 .hist-welcome p { color: rgba(24,38,50,.65); font-size: 16px; max-width: 480px; }
 
+.brand-nav-row {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .hist-empty {
   padding: 24px;
   color: rgba(24,38,50,.5);
@@ -715,7 +722,6 @@ body.history-page .final-doc-header p {
 
 /* ── Builder page additions ─────────────────────────────────────────────── */
 .history-nav-btn {
-  margin-inline-start: auto;
   display: grid;
   place-items: center;
   width: 38px;

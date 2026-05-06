@@ -28,6 +28,7 @@ if str(SRC_DIR) not in sys.path:
 import chunking
 import classification
 import header_inspection
+import milvus_rag
 import rag_txt_export
 import section_json_extraction
 
@@ -61,6 +62,10 @@ app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
 _jobs: dict[str, "UiJob"] = {}
 _active_job_id: str | None = None
 _jobs_lock = threading.RLock()
+
+_milvus_jobs: dict[str, "MilvusJob"] = {}
+_active_milvus_job_id: str | None = None
+_milvus_jobs_lock = threading.RLock()
 
 
 def static_asset_version(filename: str) -> int:
@@ -1489,6 +1494,17 @@ def default_steps() -> list[dict[str, Any]]:
         {"id": "final", "label": "Display final document", "status": "pending", "detail": "Format the generated JSON"},
     ]
 
+
+def default_milvus_steps() -> list[dict[str, Any]]:
+    return [
+        {"id": "select", "label": "Select documents", "status": "pending", "detail": "Choose one or more RAG TXT document sets"},
+        {"id": "validate", "label": "Validate chunk sizes", "status": "pending", "detail": "Stop if any TXT would exceed Milvus limits"},
+        {"id": "model", "label": "Load models", "status": "pending", "detail": "Load the embedding and reranker models on CUDA"},
+        {"id": "collection", "label": "Recreate collection", "status": "pending", "detail": "Drop and rebuild the target Milvus collection"},
+        {"id": "ingest", "label": "Embed and insert", "status": "pending", "detail": "Write vectors and metadata to Milvus"},
+        {"id": "ready", "label": "Ready to query", "status": "pending", "detail": "Ask a question and inspect the results"},
+    ]
+
 @dataclass
 class UiJob:
     id: str
@@ -1561,6 +1577,78 @@ class UiJob:
                     step["status"] = status
                     if detail is not None:
                         step["detail"] = detail
+                    break
+            self.touch()
+
+    def add_message(self, message: str, kind: str = "info") -> None:
+        with self.lock:
+            self.messages.append({"time": utc_timestamp(), "kind": kind, "message": repair_text(message)})
+            self.touch()
+
+
+@dataclass
+class MilvusJob:
+    id: str
+    collection_name: str
+    config: dict[str, Any]
+    documents: list[dict[str, Any]]
+    status: str = "queued"
+    phase: str = "queued"
+    phase_label: str = "Queued"
+    progress: dict[str, Any] = field(default_factory=lambda: {"current": 0, "total": 1, "percent": 0, "detail": "Queued"})
+    steps: list[dict[str, Any]] = field(default_factory=default_milvus_steps)
+    messages: list[dict[str, str]] = field(default_factory=list)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    version: int = 0
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+    def touch(self) -> None:
+        self.version += 1
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "id": self.id,
+                "collection_name": self.collection_name,
+                "status": self.status,
+                "phase": self.phase,
+                "phase_label": self.phase_label,
+                "progress": dict(self.progress),
+                "steps": [dict(step) for step in self.steps],
+                "messages": list(self.messages[-80:]),
+                "documents": [
+                    {"id": document.get("id"), "name": document.get("name")}
+                    for document in self.documents
+                ],
+                "result": dict(self.result) if isinstance(self.result, dict) else self.result,
+                "error": self.error,
+                "version": self.version,
+            }
+
+    def set_status(self, status: str, phase: str, label: str, detail: str | None = None) -> None:
+        with self.lock:
+            self.status = status
+            self.phase = phase
+            self.phase_label = label
+            if detail is not None:
+                self.progress["detail"] = detail
+            self.touch()
+
+    def set_progress(self, *, current: int, total: int, detail: str) -> None:
+        with self.lock:
+            safe_total = max(total, 0)
+            percent = 0 if safe_total <= 0 else max(0, min(100, round((current / safe_total) * 100)))
+            self.progress = {"current": max(0, current), "total": safe_total, "percent": percent, "detail": repair_text(detail)}
+            self.touch()
+
+    def update_step(self, step_id: str, status: str, detail: str | None = None) -> None:
+        with self.lock:
+            for step in self.steps:
+                if step["id"] == step_id:
+                    step["status"] = status
+                    if detail is not None:
+                        step["detail"] = repair_text(detail)
                     break
             self.touch()
 
@@ -1750,6 +1838,130 @@ def export_job_rag_txt(job: UiJob) -> dict[str, Any]:
         cell_map=cell_map,
         asset_map=asset_map,
     )
+
+
+def list_milvus_documents() -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    for entry in list_history_documents():
+        if not entry.get("has_rag_txt"):
+            continue
+        doc_id = str(entry["id"])
+        doc_path = doc_id_to_path(doc_id)
+        if doc_path is None:
+            continue
+        try:
+            manifest = milvus_rag.load_rag_manifest(doc_path)
+        except Exception:
+            continue
+        total_characters = 0
+        for chunk in manifest.get("chunks") or []:
+            if isinstance(chunk, dict):
+                total_characters += int(chunk.get("content_character_count") or 0)
+        documents.append({
+            "id": doc_id,
+            "name": entry["name"],
+            "created_at": entry["created_at"],
+            "rag_chunk_count": int(manifest.get("chunk_count") or 0),
+            "total_characters": total_characters,
+            "has_section_json": bool(entry.get("has_section_json")),
+        })
+    return documents
+
+
+def resolve_milvus_documents(doc_ids: list[Any]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_doc_id in doc_ids:
+        if not isinstance(raw_doc_id, str):
+            continue
+        doc_id = raw_doc_id.strip()
+        if not doc_id or doc_id in seen:
+            continue
+        doc_path = doc_id_to_path(doc_id)
+        if doc_path is None:
+            raise PipelineError("One or more selected documents could not be found.")
+        try:
+            milvus_rag.load_rag_manifest(doc_path)
+        except Exception as exc:
+            raise PipelineError(f"{doc_path.name} is missing a valid rag_txt manifest: {repair_text(exc)}") from exc
+        selected.append({
+            "id": doc_id,
+            "name": doc_path.name,
+            "path": str(doc_path),
+        })
+        seen.add(doc_id)
+    if not selected:
+        raise PipelineError("Select at least one document with rag_txt output.")
+    return selected
+
+
+def milvus_progress(job: MilvusJob, payload: dict[str, Any]) -> None:
+    stage = str(payload.get("stage") or "")
+    current = int(payload.get("current") or 0)
+    total = int(payload.get("total") or 0)
+    detail = repair_text(str(payload.get("detail") or "Working"))
+
+    if stage == "validate":
+        job.update_step("select", "done", f"{len(job.documents)} documents selected")
+        job.update_step("validate", "running", detail)
+        job.set_status("running", "validate", "Validating RAG TXT files", detail)
+    elif stage == "model":
+        job.update_step("validate", "done", "All selected TXT files fit the Milvus limits")
+        job.update_step("model", "running", detail)
+        job.set_status("running", "model", "Loading embedding model", detail)
+    elif stage == "connect":
+        job.update_step("model", "done", "Models ready")
+        job.update_step("collection", "running", "Connecting to Milvus and recreating the collection")
+        job.set_status("running", "collection", "Recreating collection", detail)
+    elif stage in {"embed", "insert"}:
+        if job.steps[3]["status"] != "done":
+            job.update_step("collection", "done", f"Collection {job.collection_name} is ready")
+        job.update_step("ingest", "running", detail)
+        job.set_status("running", "ingest", "Ingesting chunks", detail)
+
+    job.set_progress(current=current, total=total, detail=detail)
+
+
+def run_milvus_ingestion(job: MilvusJob) -> None:
+    try:
+        job.update_step("select", "running", f"{len(job.documents)} documents queued")
+        job.set_status("running", "validate", "Preparing ingestion", "Checking the selected RAG TXT files")
+        job.set_progress(current=0, total=max(1, len(job.documents)), detail="Checking the selected RAG TXT files")
+        result = milvus_rag.ingest_documents(
+            collection_name=job.collection_name,
+            milvus_uri=str(job.config["milvus_uri"]),
+            milvus_token=str(job.config.get("milvus_token") or ""),
+            milvus_db_name=str(job.config["milvus_db_name"]),
+            documents=job.documents,
+            batch_size=int(job.config["batch_size"]),
+            progress_callback=lambda payload: milvus_progress(job, payload),
+        )
+        if result.get("recreated"):
+            job.add_message(f"Existing collection {job.collection_name} was dropped and recreated.")
+        job.add_message(
+            f"Ingested {result.get('chunk_count', 0)} chunks from {result.get('document_count', 0)} documents into {job.collection_name}."
+        )
+        with job.lock:
+            job.result = result
+            job.touch()
+        job.update_step("model", "done", "Embedding model ready")
+        job.update_step("collection", "done", f"Collection {job.collection_name} is ready")
+        job.update_step("ingest", "done", f"{result.get('chunk_count', 0)} chunks inserted")
+        job.update_step("ready", "done", "Collection is ready for retrieval")
+        job.set_progress(current=1, total=1, detail="Collection is ready for retrieval")
+        job.set_status("completed", "ready", "Milvus collection ready", "Collection is ready for retrieval")
+    except Exception as exc:
+        with job.lock:
+            job.status = "failed"
+            job.phase = "failed"
+            job.phase_label = "Stopped"
+            job.error = repair_text(str(exc)) or exc.__class__.__name__
+            for step in job.steps:
+                if step["status"] in {"running", "paused"}:
+                    step["status"] = "error"
+                    step["detail"] = job.error
+            job.touch()
+        job.add_message(traceback.format_exc(), kind="error")
 
 
 def build_review_items(job: UiJob, classification_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2028,6 +2240,20 @@ def index() -> str:
     )
 
 
+@app.get("/milvus")
+def milvus_page() -> str:
+    return render_template(
+        "milvus.html",
+        default_milvus_uri=milvus_rag.DEFAULT_MILVUS_URI,
+        default_milvus_db_name=milvus_rag.DEFAULT_MILVUS_DB_NAME,
+        default_embedding_model=milvus_rag.EMBEDDING_MODEL_NAME,
+        default_reranker_model=milvus_rag.RERANKER_MODEL_NAME,
+        default_top_k=milvus_rag.DEFAULT_TOP_K,
+        default_top_n=milvus_rag.DEFAULT_TOP_N,
+        dependency_error=milvus_rag.dependency_error_message(),
+    )
+
+
 @app.post("/api/upload")
 def api_upload() -> Response:
     global _active_job_id
@@ -2268,6 +2494,119 @@ def api_reset() -> Response:
             return jsonify({"error": "Cannot reset while a document is being processed."}), 409
         _active_job_id = None
     return jsonify({"ok": True})
+
+
+@app.get("/api/milvus/documents")
+def api_milvus_documents() -> Response:
+    return jsonify(list_milvus_documents())
+
+
+@app.get("/api/milvus/state")
+def api_milvus_state() -> Response:
+    with _milvus_jobs_lock:
+        job = _milvus_jobs.get(_active_milvus_job_id or "")
+    if job is None:
+        return jsonify({"status": "idle", "steps": default_milvus_steps(), "messages": [], "version": 0})
+    return jsonify(job.snapshot())
+
+
+@app.get("/api/milvus/events")
+def api_milvus_events() -> Response:
+    def stream() -> Any:
+        last_version: int | None = None
+        idle_sent = False
+        while True:
+            with _milvus_jobs_lock:
+                job = _milvus_jobs.get(_active_milvus_job_id or "")
+            if job is None:
+                if not idle_sent:
+                    yield "data: " + json.dumps({"status": "idle", "version": 0}) + "\n\n"
+                    idle_sent = True
+                time.sleep(0.8)
+                continue
+            snapshot = job.snapshot()
+            if snapshot["version"] != last_version:
+                yield "data: " + json.dumps(snapshot, ensure_ascii=False) + "\n\n"
+                last_version = snapshot["version"]
+            time.sleep(0.5)
+
+    return Response(stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/milvus/reset")
+def api_milvus_reset() -> Response:
+    global _active_milvus_job_id
+    with _milvus_jobs_lock:
+        active = _milvus_jobs.get(_active_milvus_job_id or "")
+        if active and active.status in {"queued", "running"}:
+            return jsonify({"error": "Cannot reset while an ingestion job is running."}), 409
+        _active_milvus_job_id = None
+    return jsonify({"ok": True})
+
+
+@app.post("/api/milvus/ingest")
+def api_milvus_ingest() -> Response:
+    global _active_milvus_job_id
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        collection_name = milvus_rag.validate_collection_name(str(body.get("collection_name") or ""))
+        documents = resolve_milvus_documents(body.get("doc_ids") if isinstance(body.get("doc_ids"), list) else [])
+        config = {
+            "milvus_uri": milvus_rag.normalize_milvus_uri(str(body.get("milvus_uri") or milvus_rag.DEFAULT_MILVUS_URI)),
+            "milvus_token": str(body.get("milvus_token") or ""),
+            "milvus_db_name": str(body.get("milvus_db_name") or milvus_rag.DEFAULT_MILVUS_DB_NAME),
+            "batch_size": max(1, int(body.get("batch_size") or milvus_rag.DEFAULT_BATCH_SIZE)),
+        }
+    except PipelineError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except ValueError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+
+    with _milvus_jobs_lock:
+        if _active_milvus_job_id:
+            active = _milvus_jobs.get(_active_milvus_job_id)
+            if active and active.status in {"queued", "running"}:
+                return jsonify({"error": "A Milvus ingestion job is already running."}), 409
+        job_id = datetime.now().strftime("milvus-%Y%m%d%H%M%S%f")
+        job = MilvusJob(
+            id=job_id,
+            collection_name=collection_name,
+            config=config,
+            documents=documents,
+        )
+        _milvus_jobs[job_id] = job
+        _active_milvus_job_id = job_id
+
+    thread = threading.Thread(target=run_milvus_ingestion, args=(job,), name=f"milvus-ingest-{job_id}", daemon=True)
+    thread.start()
+    return jsonify({"job_id": job_id})
+
+
+@app.post("/api/milvus/query")
+def api_milvus_query() -> Response:
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        raw_doc_ids = body.get("doc_ids") if isinstance(body.get("doc_ids"), list) else []
+        selected_documents = resolve_milvus_documents(raw_doc_ids) if raw_doc_ids else []
+        payload = milvus_rag.query_collection(
+            question=str(body.get("question") or ""),
+            collection_name=str(body.get("collection_name") or ""),
+            milvus_uri=str(body.get("milvus_uri") or milvus_rag.DEFAULT_MILVUS_URI),
+            milvus_token=str(body.get("milvus_token") or ""),
+            milvus_db_name=str(body.get("milvus_db_name") or milvus_rag.DEFAULT_MILVUS_DB_NAME),
+            top_k=int(body.get("top_k") or milvus_rag.DEFAULT_TOP_K),
+            top_n=int(body.get("top_n") or milvus_rag.DEFAULT_TOP_N),
+            document_ids=[str(document["id"]) for document in selected_documents],
+        )
+    except ValueError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": repair_text(exc)}), 500
+    return jsonify(payload)
 
 
 # ── History routes ────────────────────────────────────────────────────────────

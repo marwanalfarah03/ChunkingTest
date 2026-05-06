@@ -649,8 +649,14 @@ th > .rich-text,
 
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(0,147,201,.5); } 50% { box-shadow: 0 0 0 8px rgba(0,147,201,0); } }
 
-.history-nav-btn {
+.brand-nav-row {
   margin-inline-start: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-nav-btn {
   display: grid;
   place-items: center;
   width: 38px;
