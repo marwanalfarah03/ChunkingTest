@@ -10,7 +10,7 @@ main.py
 
 # Virtual environment
 .venv/
-
+venv/
 # Zip snapshots
 *.zip
 
