@@ -31,14 +31,15 @@ import header_inspection
 import milvus_rag
 import rag_txt_export
 import section_json_extraction
+from common_resources import CHUNKS_MAP_PATH as SHARED_CHUNKS_MAP_PATH, DOCUMENTS_ROOT as SHARED_DOCUMENTS_ROOT, resolve_workspace_path
 
-DOCUMENTS_ROOT = PROJECT_ROOT / "documents"
+DOCUMENTS_ROOT = SHARED_DOCUMENTS_ROOT
 ALLOWED_EXTENSIONS = {".docx"}
 DEFAULT_CLASSIFICATION_OUTPUT_NAME = "classification_output.json"
 DEFAULT_INSPECTION_OUTPUT_NAME = "column_header_inspection.json"
 DEFAULT_SECTION_JSON_OUTPUT_NAME = "section_json_output.json"
 DOCUMENT_METADATA_NAME = "document_metadata.json"
-CHUNKS_MAP_PATH = PROJECT_ROOT / "chunks_map.json"
+CHUNKS_MAP_PATH = SHARED_CHUNKS_MAP_PATH
 
 CL_TOKEN_RE = re.compile(r"CL\d{6}")
 TB_TOKEN_RE = re.compile(r"<TB\d{6}>")
@@ -231,7 +232,10 @@ def list_history_documents() -> list[dict[str, Any]]:
                 "llm_calls.jsonl",
             ]
         )
+        has_rag_txt = (entry / "rag_txt").is_dir()
         if source_docx is None and artifact_dir is None and not has_history_artifacts:
+            continue
+        if source_docx is None and artifact_dir == entry and not has_history_artifacts and not has_rag_txt:
             continue
         chunk_count = 0
         if artifact_dir is not None:
@@ -251,7 +255,7 @@ def list_history_documents() -> list[dict[str, Any]]:
             "has_inspection": (entry / DEFAULT_INSPECTION_OUTPUT_NAME).exists(),
             "has_section_json": (entry / DEFAULT_SECTION_JSON_OUTPUT_NAME).exists(),
             "has_llm_logs": has_llm_logs,
-            "has_rag_txt": (entry / "rag_txt").is_dir(),
+            "has_rag_txt": has_rag_txt,
             "has_assets": bool(history_asset_list(artifact_dir)),
             "chunk_count": chunk_count,
         })
@@ -569,6 +573,20 @@ def department_catalog() -> dict[str, Any]:
     history_departments: dict[str, list[str]] = {}
     if DOCUMENTS_ROOT.exists():
         for entry in sorted((p for p in DOCUMENTS_ROOT.iterdir() if p.is_dir()), key=lambda p: p.name.casefold()):
+            source_docx = history_source_docx(entry)
+            artifact_dir = history_artifact_dir(entry)
+            has_history_artifacts = any(
+                (entry / filename).exists()
+                for filename in [
+                    DEFAULT_CLASSIFICATION_OUTPUT_NAME,
+                    DEFAULT_INSPECTION_OUTPUT_NAME,
+                    DEFAULT_SECTION_JSON_OUTPUT_NAME,
+                    "llm_calls.jsonl",
+                ]
+            )
+            has_rag_txt = (entry / "rag_txt").is_dir()
+            if source_docx is None and artifact_dir == entry and not has_history_artifacts and not has_rag_txt:
+                continue
             departments = get_document_departments(entry, chunks_map)
             history_departments[entry.name] = departments
             add_departments(departments)
@@ -908,7 +926,7 @@ class DocumentRenderer:
                 return self.render_table(table_id)
         content = ""
         if relative_path:
-            path = PROJECT_ROOT / relative_path
+            path = resolve_workspace_path(relative_path)
             if path.exists():
                 content = path.read_text(encoding="utf-8")
         if not content:

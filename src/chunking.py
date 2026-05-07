@@ -15,6 +15,8 @@ from xml.etree import ElementTree as ET
 import olefile
 from oletools import oleobj
 
+from common_resources import DOCUMENTS_ROOT
+
 
 
 NS = {
@@ -175,7 +177,7 @@ def project_root() -> Path:
 
 
 def documents_root() -> Path:
-    return project_root() / DOCUMENTS_DIRNAME
+    return DOCUMENTS_ROOT
 
 
 def default_output_dir_for_docx(docx_path: Path) -> Path:

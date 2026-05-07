@@ -20,6 +20,7 @@ from classification import (
     resolve_document_path,
     write_json,
 )
+from common_resources import DOCUMENTS_ROOT, resolve_documents_root
 from header_inspection import (
     DEFAULT_CELL_MAP_NAME,
     DEFAULT_CLASSIFICATION_OUTPUT_NAME,
@@ -590,7 +591,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--documents-root",
-        default="documents",
+        default=str(DOCUMENTS_ROOT),
         help="Directory holding extracted document folders.",
     )
     parser.add_argument(
@@ -640,9 +641,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    documents_root = Path(args.documents_root)
-    if not documents_root.is_absolute():
-        documents_root = PROJECT_ROOT / documents_root
+    documents_root = resolve_documents_root(args.documents_root)
 
     document_path = resolve_document_path(args.document, documents_root)
 

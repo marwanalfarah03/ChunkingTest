@@ -12,6 +12,7 @@ from typing import Any, Callable
 from openai import NotFoundError, OpenAI
 
 from chunking import EMPTY_TABLE_SENTINEL
+from common_resources import DOCUMENTS_ROOT, resolve_documents_root, resolve_workspace_path, serialize_workspace_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -66,11 +67,11 @@ def section_sort_key(section_id: str) -> int:
 
 
 def project_relative_path(path: Path) -> str:
-    resolved_path = path.resolve()
-    try:
-        return resolved_path.relative_to(PROJECT_ROOT).as_posix()
-    except ValueError:
-        return str(resolved_path)
+    return serialize_workspace_path(path)
+
+
+def resolve_runtime_path(path_value: str | os.PathLike[str]) -> Path:
+    return resolve_workspace_path(path_value)
 
 
 def load_system_prompt() -> str:
@@ -328,6 +329,7 @@ def resolve_document_path(document: str, documents_root: Path) -> Path:
     if requested_path.is_absolute():
         add_candidate(requested_path)
     else:
+        add_candidate(resolve_runtime_path(requested_path))
         add_candidate(PROJECT_ROOT / requested_path)
         add_candidate(documents_root / requested_path)
 
@@ -401,7 +403,11 @@ def parse_args() -> argparse.Namespace:
             "or a source .docx path whose extracted directory shares the same stem under documents/."
         ),
     )
-    parser.add_argument("--documents-root", default="documents", help="Directory holding extracted document folders.")
+    parser.add_argument(
+        "--documents-root",
+        default=str(DOCUMENTS_ROOT),
+        help="Directory holding extracted document folders.",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Model identifier.")
     parser.add_argument(
         "--base-url",
@@ -435,9 +441,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    documents_root = Path(args.documents_root)
-    if not documents_root.is_absolute():
-        documents_root = PROJECT_ROOT / documents_root
+    documents_root = resolve_documents_root(args.documents_root)
 
     document_path = resolve_document_path(args.document, documents_root)
     targets = load_document_targets(document_path)

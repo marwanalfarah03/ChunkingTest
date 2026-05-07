@@ -19,9 +19,11 @@ from classification import (
     SECTION_INDEX,
     initialize_client,
     project_relative_path,
+    resolve_runtime_path,
     resolve_document_path,
     write_json,
 )
+from common_resources import DOCUMENTS_ROOT, resolve_documents_root
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -237,7 +239,7 @@ def detect_actual_header_labels(
 def resolve_chunk_path(relative_path: str | None) -> Path | None:
     if not relative_path:
         return None
-    candidate = PROJECT_ROOT / relative_path
+    candidate = resolve_runtime_path(relative_path)
     if candidate.exists():
         return candidate.resolve()
     return None
@@ -1410,7 +1412,11 @@ def parse_args() -> argparse.Namespace:
             "or a source .docx path whose extracted directory shares the same stem under documents/."
         ),
     )
-    parser.add_argument("--documents-root", default="documents", help="Directory holding extracted document folders.")
+    parser.add_argument(
+        "--documents-root",
+        default=str(DOCUMENTS_ROOT),
+        help="Directory holding extracted document folders.",
+    )
     parser.add_argument(
         "--classification-output",
         default=None,
@@ -1445,9 +1451,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    documents_root = Path(args.documents_root)
-    if not documents_root.is_absolute():
-        documents_root = PROJECT_ROOT / documents_root
+    documents_root = resolve_documents_root(args.documents_root)
 
     document_path = resolve_document_path(args.document, documents_root)
     classification_output_path = Path(args.classification_output) if args.classification_output else document_path / DEFAULT_CLASSIFICATION_OUTPUT_NAME
