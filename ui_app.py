@@ -37,6 +37,8 @@ ALLOWED_EXTENSIONS = {".docx"}
 DEFAULT_CLASSIFICATION_OUTPUT_NAME = "classification_output.json"
 DEFAULT_INSPECTION_OUTPUT_NAME = "column_header_inspection.json"
 DEFAULT_SECTION_JSON_OUTPUT_NAME = "section_json_output.json"
+DOCUMENT_METADATA_NAME = "document_metadata.json"
+CHUNKS_MAP_PATH = PROJECT_ROOT / "chunks_map.json"
 
 CL_TOKEN_RE = re.compile(r"CL\d{6}")
 TB_TOKEN_RE = re.compile(r"<TB\d{6}>")
@@ -48,6 +50,7 @@ RTL_CHAR_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 LTR_CHAR_RE = re.compile(r"[A-Za-z]")
 FORMATTING_TAG_RE = re.compile(r"</?(?:strong|em|u)>|<HL:[^>]*>|</HL>", re.IGNORECASE)
 INVISIBLE_CHARS_RE = re.compile(r"[​‌‍‎‏‪-‮⁠﻿]")
+DOCUMENT_TIMESTAMP_SUFFIX_RE = re.compile(r"_\d{8}_\d{6}(?:_\d+)?$")
 
 WORKFLOW_HEADER_LEVELS = {
     "group_header": 1,
@@ -59,6 +62,16 @@ WORKFLOW_HEADER_LEVELS = {
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024
 
+
+@app.after_request
+def disable_html_caching(response: Response) -> Response:
+    content_type = response.headers.get("Content-Type", "")
+    if content_type.startswith("text/html"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 _jobs: dict[str, "UiJob"] = {}
 _active_job_id: str | None = None
 _jobs_lock = threading.RLock()
@@ -66,6 +79,7 @@ _jobs_lock = threading.RLock()
 _milvus_jobs: dict[str, "MilvusJob"] = {}
 _active_milvus_job_id: str | None = None
 _milvus_jobs_lock = threading.RLock()
+_department_catalog_lock = threading.RLock()
 
 
 def static_asset_version(filename: str) -> int:
@@ -200,6 +214,7 @@ def list_history_documents() -> list[dict[str, Any]]:
     """Return metadata for every document directory under DOCUMENTS_ROOT."""
     if not DOCUMENTS_ROOT.exists():
         return []
+    chunks_map = load_chunks_map()
     docs: list[dict[str, Any]] = []
     entries = [p for p in DOCUMENTS_ROOT.iterdir() if p.is_dir()]
     for entry in sorted(entries, key=history_entry_mtime, reverse=True):
@@ -225,10 +240,12 @@ def list_history_documents() -> list[dict[str, Any]]:
                 if p.is_file() and p.suffix.lower() == ".txt" and "_nested_" not in p.name
             )
         has_llm_logs = (entry / "llm_calls.jsonl").exists()
+        departments = get_document_departments(entry, chunks_map)
         docs.append({
             "id": doc_dir_to_id(entry.name),
             "name": entry.name,
             "created_at": datetime.fromtimestamp(history_entry_mtime(entry), tz=timezone.utc).isoformat(),
+            "departments": departments,
             "has_docx": source_docx is not None,
             "has_classification": (entry / DEFAULT_CLASSIFICATION_OUTPUT_NAME).exists(),
             "has_inspection": (entry / DEFAULT_INSPECTION_OUTPUT_NAME).exists(),
@@ -398,6 +415,169 @@ def section_display(section_id: str) -> dict[str, str]:
 
 def section_options() -> list[dict[str, str]]:
     return [section_display(section["id"]) for section in classification.SECTIONS]
+
+
+def normalize_department_names(raw_values: Any) -> list[str]:
+    if isinstance(raw_values, str):
+        values = [raw_values]
+    elif isinstance(raw_values, (list, tuple, set)):
+        values = list(raw_values)
+    else:
+        values = []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = re.sub(r"\s+", " ", repair_text(raw_value)).strip(" ,;")
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(value)
+    return normalized
+
+
+def parse_requested_departments(raw_value: Any) -> list[str]:
+    payload = raw_value
+    if isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            payload = []
+        else:
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                payload = [stripped]
+    return normalize_department_names(payload)
+
+
+def document_name_lookup_candidates(document_name: str) -> list[str]:
+    normalized_name = re.sub(r"\s+", " ", repair_text(document_name)).strip()
+    if not normalized_name:
+        return []
+    candidates = [normalized_name]
+    stripped_name = DOCUMENT_TIMESTAMP_SUFFIX_RE.sub("", normalized_name)
+    if stripped_name and stripped_name != normalized_name:
+        candidates.append(stripped_name)
+    return candidates
+
+
+def document_metadata_path(doc_path: Path) -> Path:
+    return doc_path / DOCUMENT_METADATA_NAME
+
+
+def load_chunks_map() -> dict[str, list[str]]:
+    with _department_catalog_lock:
+        if not CHUNKS_MAP_PATH.exists():
+            return {}
+        try:
+            raw_payload = json.loads(CHUNKS_MAP_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    if not isinstance(raw_payload, dict):
+        return {}
+
+    chunks_map: dict[str, list[str]] = {}
+    for raw_document_name, raw_departments in raw_payload.items():
+        document_name = re.sub(r"\s+", " ", repair_text(raw_document_name)).strip()
+        if not document_name:
+            continue
+        chunks_map[document_name] = normalize_department_names(raw_departments)
+    return chunks_map
+
+
+def update_chunks_map_entry(document_name: str, departments: list[str]) -> None:
+    normalized_name = re.sub(r"\s+", " ", repair_text(document_name)).strip()
+    normalized_departments = normalize_department_names(departments)
+    if not normalized_name or not normalized_departments:
+        raise ValueError("Each document needs at least one department.")
+
+    with _department_catalog_lock:
+        if CHUNKS_MAP_PATH.exists():
+            try:
+                raw_payload = json.loads(CHUNKS_MAP_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                raw_payload = {}
+        else:
+            raw_payload = {}
+        if not isinstance(raw_payload, dict):
+            raw_payload = {}
+        raw_payload[normalized_name] = normalized_departments
+        classification.write_json(CHUNKS_MAP_PATH, raw_payload)
+
+
+def load_document_metadata(doc_path: Path) -> dict[str, Any]:
+    metadata_path = document_metadata_path(doc_path)
+    if not metadata_path.exists():
+        return {}
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def get_document_departments(doc_path: Path, chunks_map: dict[str, list[str]] | None = None) -> list[str]:
+    metadata = load_document_metadata(doc_path)
+    metadata_departments = normalize_department_names(metadata.get("departments"))
+    if metadata_departments:
+        return metadata_departments
+
+    source_map = chunks_map if chunks_map is not None else load_chunks_map()
+    for candidate_name in document_name_lookup_candidates(doc_path.name):
+        departments = source_map.get(candidate_name)
+        if departments:
+            return list(departments)
+    return []
+
+
+def save_document_departments(doc_path: Path, departments: Any) -> list[str]:
+    normalized_departments = normalize_department_names(departments)
+    if not normalized_departments:
+        raise ValueError("Each document needs at least one department.")
+
+    classification.write_json(
+        document_metadata_path(doc_path),
+        {
+            "departments": normalized_departments,
+            "updated_at": utc_timestamp(),
+        },
+    )
+    update_chunks_map_entry(doc_path.name, normalized_departments)
+    return normalized_departments
+
+
+def department_catalog() -> dict[str, Any]:
+    chunks_map = load_chunks_map()
+    options: list[str] = []
+    seen: set[str] = set()
+
+    def add_departments(values: list[str]) -> None:
+        for value in normalize_department_names(values):
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append(value)
+
+    for departments in chunks_map.values():
+        add_departments(departments)
+
+    history_departments: dict[str, list[str]] = {}
+    if DOCUMENTS_ROOT.exists():
+        for entry in sorted((p for p in DOCUMENTS_ROOT.iterdir() if p.is_dir()), key=lambda p: p.name.casefold()):
+            departments = get_document_departments(entry, chunks_map)
+            history_departments[entry.name] = departments
+            add_departments(departments)
+
+    return {
+        "options": options,
+        "document_departments": chunks_map,
+        "history_departments": history_departments,
+    }
 
 
 def safe_document_stem(filename: str) -> str:
@@ -2254,6 +2434,11 @@ def milvus_page() -> str:
     )
 
 
+@app.get("/api/department-catalog")
+def api_department_catalog() -> Response:
+    return jsonify(department_catalog())
+
+
 @app.post("/api/upload")
 def api_upload() -> Response:
     global _active_job_id
@@ -2263,6 +2448,9 @@ def api_upload() -> Response:
     suffix = Path(upload.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         return jsonify({"error": "Only DOCX files are supported."}), 400
+    departments = parse_requested_departments(request.form.get("departments_json"))
+    if not departments:
+        return jsonify({"error": "Select at least one department before starting."}), 400
     with _jobs_lock:
         if _active_job_id and _jobs.get(_active_job_id) and _jobs[_active_job_id].status in {"queued", "running", "awaiting_review"}:
             return jsonify({"error": "A document is already being processed. Finish it before uploading another."}), 409
@@ -2271,6 +2459,7 @@ def api_upload() -> Response:
         document_path.mkdir(parents=True, exist_ok=False)
         source_path = document_path / chunking.DEFAULT_SOURCE_DOCX_NAME
         upload.save(source_path)
+        save_document_departments(document_path, departments)
         job_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
         config = {
             "model": request.form.get("model") or classification.DEFAULT_MODEL,
@@ -2998,6 +3187,7 @@ def api_history_detail(doc_id: str) -> Response:
 
     artifact_dir = history_artifact_dir(doc_path)
     source_docx = history_source_docx(doc_path)
+    departments = get_document_departments(doc_path)
     chunk_count = 0
     if artifact_dir is not None:
         chunk_count = sum(
@@ -3008,6 +3198,7 @@ def api_history_detail(doc_id: str) -> Response:
         "id": doc_id,
         "name": doc_path.name,
         "created_at": datetime.fromtimestamp(history_entry_mtime(doc_path), tz=timezone.utc).isoformat(),
+        "departments": departments,
         "has_docx": source_docx is not None,
         "chunk_count": chunk_count,
         "assets": history_asset_list(artifact_dir),
@@ -3026,6 +3217,29 @@ def api_history_detail(doc_id: str) -> Response:
         else:
             info[key] = None
     return jsonify(info)
+
+
+@app.post("/api/history/<doc_id>/departments")
+def api_history_departments(doc_id: str) -> Response:
+    doc_path = doc_id_to_path(doc_id)
+    if doc_path is None:
+        return jsonify({"error": "Document not found."}), 404
+
+    body = request.get_json(silent=True) or {}
+    departments = parse_requested_departments(body.get("departments"))
+    if not departments:
+        return jsonify({"error": "Select at least one department."}), 400
+
+    try:
+        departments = save_document_departments(doc_path, departments)
+    except ValueError as exc:
+        return jsonify({"error": repair_text(exc)}), 400
+
+    return jsonify({
+        "ok": True,
+        "departments": departments,
+        "options": department_catalog().get("options") or [],
+    })
 
 
 @app.get("/api/history/<doc_id>/chunks")

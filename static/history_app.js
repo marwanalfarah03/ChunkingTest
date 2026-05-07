@@ -35,6 +35,117 @@ async function fetchJson(url, options = {}) {
   return res.json();
 }
 
+function normalizeDepartmentName(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().replace(/^[,;\s]+|[,;\s]+$/g, '');
+}
+
+function uniqueDepartments(values = []) {
+  const seen = new Set();
+  const normalized = [];
+  for (const value of values) {
+    const department = normalizeDepartmentName(value);
+    if (!department) continue;
+    const key = department.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(department);
+  }
+  return normalized;
+}
+
+function setDepartmentOptions(options = [], extra = []) {
+  const historyDepartments = state.docs.flatMap((doc) => doc.departments || []);
+  state.departmentOptions = uniqueDepartments([...(options || []), ...(extra || []), ...historyDepartments]);
+}
+
+function setDepartmentStatus(message = '', tone = '') {
+  detailDepartmentStatus.textContent = message;
+  detailDepartmentStatus.className = `hist-department-status${tone ? ` ${tone}` : ''}`;
+}
+
+function renderDepartmentOptions() {
+  const selected = new Set(state.activeDepartments.map((department) => department.toLowerCase()));
+  historyDepartmentSelect.innerHTML = ['<option value="">Select a department</option>']
+    .concat(state.departmentOptions
+      .filter((department) => !selected.has(String(department).toLowerCase()))
+      .map((department) => `<option value="${escHtml(department)}">${escHtml(department)}</option>`))
+    .join('');
+  const disabled = !state.activeDocId || state.savingDepartments;
+  historyDepartmentSelect.disabled = disabled;
+  historyAddDepartmentButton.disabled = disabled;
+  historyCustomDepartmentInput.disabled = disabled;
+  historyAddCustomDepartmentButton.disabled = disabled;
+}
+
+function renderDepartmentTags() {
+  if (!state.activeDepartments.length) {
+    detailDepartmentTags.innerHTML = '<span class="department-empty">No departments assigned.</span>';
+    return;
+  }
+  detailDepartmentTags.innerHTML = state.activeDepartments.map((department) => `
+    <span dir="${textDir(department)}" class="department-chip text-${textDir(department)}">
+      <span>${escHtml(department)}</span>
+      <button
+        type="button"
+        class="department-chip-remove"
+        data-remove-history-department="${escHtml(department)}"
+        aria-label="Remove ${escHtml(department)}"
+        ${state.savingDepartments ? 'disabled' : ''}
+      >&times;</button>
+    </span>
+  `).join('');
+}
+
+function setActiveDepartments(departments = []) {
+  state.activeDepartments = uniqueDepartments(departments);
+  renderDepartmentTags();
+  renderDepartmentOptions();
+}
+
+function updateDocDepartments(docId, departments) {
+  const doc = state.docs.find((entry) => entry.id === docId);
+  if (doc) doc.departments = uniqueDepartments(departments);
+}
+
+async function commitDepartments(nextDepartments) {
+  if (!state.activeDocId) return;
+  const normalized = uniqueDepartments(nextDepartments);
+  if (!normalized.length) {
+    setDepartmentStatus('At least one department is required.', 'error');
+    return;
+  }
+
+  const previousDepartments = state.activeDepartments.slice();
+  state.savingDepartments = true;
+  setActiveDepartments(normalized);
+  setDepartmentStatus('Saving departments…', 'pending');
+
+  try {
+    const payload = await fetchJson(`/api/history/${encodeURIComponent(state.activeDocId)}/departments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ departments: normalized }),
+    });
+    const savedDepartments = uniqueDepartments(payload.departments || normalized);
+    setDepartmentOptions(payload.options || state.departmentOptions, savedDepartments);
+    updateDocDepartments(state.activeDocId, savedDepartments);
+    state.activeDepartments = savedDepartments;
+    setDepartmentStatus('Departments saved.', 'success');
+    renderDepartmentTags();
+    renderDepartmentOptions();
+    renderDocList();
+  } catch (err) {
+    state.activeDepartments = previousDepartments;
+    setDepartmentStatus(err.message || 'Could not save departments.', 'error');
+    renderDepartmentTags();
+    renderDepartmentOptions();
+  } finally {
+    state.savingDepartments = false;
+    renderDepartmentTags();
+    renderDepartmentOptions();
+  }
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
   docs: [],
@@ -46,6 +157,9 @@ const state = {
   search: '',
   sortField: 'date',   // 'date' | 'alpha'
   sortDir: 'desc',     // 'asc'  | 'desc'
+  departmentOptions: [],
+  activeDepartments: [],
+  savingDepartments: false,
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -57,6 +171,12 @@ const detailName   = el('detailName');
 const detailMeta   = el('detailMeta');
 const detailEyebrow= el('detailEyebrow');
 const detailDownloads = el('detailDownloads');
+const historyDepartmentSelect = el('historyDepartmentSelect');
+const historyAddDepartmentButton = el('historyAddDepartmentButton');
+const historyCustomDepartmentInput = el('historyCustomDepartmentInput');
+const historyAddCustomDepartmentButton = el('historyAddCustomDepartmentButton');
+const detailDepartmentTags = el('detailDepartmentTags');
+const detailDepartmentStatus = el('detailDepartmentStatus');
 const histTabs     = el('histTabs');
 const chunksList   = el('chunksList');
 const logsList     = el('logsList');
@@ -85,7 +205,10 @@ histTabs.addEventListener('click', (e) => {
 function renderDocList() {
   const needle = state.search.toLowerCase().trim();
   let visible = needle
-    ? state.docs.filter((d) => d.name.toLowerCase().includes(needle))
+    ? state.docs.filter((d) => {
+      const departments = (d.departments || []).join(' ').toLowerCase();
+      return d.name.toLowerCase().includes(needle) || departments.includes(needle);
+    })
     : state.docs.slice();
 
   visible.sort((a, b) => {
@@ -137,7 +260,14 @@ async function loadDocList() {
     docList.innerHTML = '<div class="hist-empty">History could not be loaded. Refresh the page after the server restarts.</div>';
     return;
   }
+  try {
+    const catalog = await fetchJson('/api/department-catalog');
+    setDepartmentOptions(catalog.options || []);
+  } catch (_error) {
+    setDepartmentOptions([]);
+  }
   renderDocList();
+  renderDepartmentOptions();
 }
 
 docList.addEventListener('click', (e) => {
@@ -178,6 +308,41 @@ sortDirBtn.addEventListener('click', () => {
   renderDocList();
 });
 
+historyAddDepartmentButton.addEventListener('click', () => {
+  const department = normalizeDepartmentName(historyDepartmentSelect.value);
+  if (!department) return;
+  historyDepartmentSelect.value = '';
+  commitDepartments([...state.activeDepartments, department]);
+});
+
+historyAddCustomDepartmentButton.addEventListener('click', () => {
+  const department = normalizeDepartmentName(historyCustomDepartmentInput.value);
+  if (!department) return;
+  historyCustomDepartmentInput.value = '';
+  commitDepartments([...state.activeDepartments, department]);
+});
+
+historyCustomDepartmentInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const department = normalizeDepartmentName(historyCustomDepartmentInput.value);
+  if (!department) return;
+  historyCustomDepartmentInput.value = '';
+  commitDepartments([...state.activeDepartments, department]);
+});
+
+detailDepartmentTags.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-remove-history-department]');
+  if (!button) return;
+  const department = String(button.dataset.removeHistoryDepartment || '');
+  const nextDepartments = state.activeDepartments.filter((value) => value.toLowerCase() !== department.toLowerCase());
+  if (!nextDepartments.length) {
+    setDepartmentStatus('At least one department is required.', 'error');
+    return;
+  }
+  commitDepartments(nextDepartments);
+});
+
 async function selectDoc(docId) {
   if (state.activeDocId === docId) return;
   state.activeDocId = docId;
@@ -198,6 +363,9 @@ async function selectDoc(docId) {
   detailEyebrow.textContent = 'Document';
   const date = formatDate(doc.created_at, 'datetime');
   detailMeta.textContent = [date, doc.chunk_count && `${doc.chunk_count} parts`].filter(Boolean).join(' · ');
+  setActiveDepartments(doc.departments || []);
+  setDepartmentStatus('');
+  historyCustomDepartmentInput.value = '';
 
   // Download buttons
   detailDownloads.innerHTML = `
@@ -235,9 +403,13 @@ detailDownloads.addEventListener('click', async (e) => {
     state.loadedLogs = null;
     state.loadedJsons = null;
     state.allLogs = [];
+    state.activeDepartments = [];
     show(histDetail, false);
     show(histWelcome, true);
     finalOutputContainer.innerHTML = '';
+    renderDepartmentTags();
+    renderDepartmentOptions();
+    setDepartmentStatus('');
     await loadDocList();
   } catch (err) {
     button.disabled = false;
@@ -630,4 +802,6 @@ ragDownloadBtn.addEventListener('click', async () => {
 });
 
 // ── Init ───────────────────────────────────────────────────────────────────
+renderDepartmentTags();
+renderDepartmentOptions();
 loadDocList();

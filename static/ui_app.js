@@ -3,12 +3,23 @@ const state = {
   reviewItems: [],
   sectionOptions: [],
   finalLoaded: false,
+  departmentCatalog: {
+    options: [],
+    document_departments: {},
+  },
+  selectedDepartments: [],
 };
 
 const el = (id) => document.getElementById(id);
 const uploadForm = el('uploadForm');
 const documentInput = el('documentInput');
 const fileLabel = el('fileLabel');
+const departmentSelect = el('departmentSelect');
+const addDepartmentButton = el('addDepartmentButton');
+const customDepartmentInput = el('customDepartmentInput');
+const addCustomDepartmentButton = el('addCustomDepartmentButton');
+const selectedDepartments = el('selectedDepartments');
+const departmentsJson = el('departmentsJson');
 const uploadError = el('uploadError');
 const startButton = el('startButton');
 const uploadPanel = el('uploadPanel');
@@ -62,6 +73,102 @@ function dirAttrs(value, extraClass = '') {
 
 function show(panel, visible) {
   panel.classList.toggle('hidden', !visible);
+}
+
+function normalizeDepartmentName(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().replace(/^[,;\s]+|[,;\s]+$/g, '');
+}
+
+function documentNameCandidates(filename) {
+  const raw = String(filename ?? '').trim();
+  if (!raw) return [];
+  const stem = raw.replace(/\.[^.]+$/, '').replace(/\s+/g, ' ').trim();
+  if (!stem) return [];
+  const base = stem.replace(/_\d{8}_\d{6}(?:_\d+)?$/, '').trim();
+  return [...new Set([stem, base].filter(Boolean))];
+}
+
+function uniqueDepartments(values = []) {
+  const seen = new Set();
+  const normalized = [];
+  for (const value of values) {
+    const name = normalizeDepartmentName(value);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(name);
+  }
+  return normalized;
+}
+
+function setSelectedDepartments(values = []) {
+  state.selectedDepartments = uniqueDepartments(values);
+  departmentsJson.value = JSON.stringify(state.selectedDepartments);
+  renderSelectedDepartments();
+  renderDepartmentOptions();
+}
+
+function renderSelectedDepartments() {
+  if (!state.selectedDepartments.length) {
+    selectedDepartments.innerHTML = '<span class="department-empty">No departments selected yet.</span>';
+    return;
+  }
+  selectedDepartments.innerHTML = state.selectedDepartments.map((department) => `
+    <span ${dirAttrs(department, 'department-chip')}>
+      <span>${escapeHtml(department)}</span>
+      <button type="button" class="department-chip-remove" data-remove-department="${escapeHtml(department)}" aria-label="Remove ${escapeHtml(department)}">&times;</button>
+    </span>
+  `).join('');
+}
+
+function renderDepartmentOptions() {
+  const selected = new Set(state.selectedDepartments.map((department) => department.toLowerCase()));
+  const options = uniqueDepartments(state.departmentCatalog.options || []);
+  departmentSelect.innerHTML = ['<option value="">Select a department</option>']
+    .concat(options
+      .filter((department) => !selected.has(department.toLowerCase()))
+      .map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`))
+    .join('');
+}
+
+function lookupSuggestedDepartments(filename) {
+  const mapping = state.departmentCatalog.document_departments || {};
+  const entries = Object.entries(mapping);
+  for (const candidate of documentNameCandidates(filename)) {
+    const match = entries.find(([name]) => String(name).toLowerCase() === candidate.toLowerCase());
+    if (match) return uniqueDepartments(match[1]);
+  }
+  return [];
+}
+
+function syncSuggestedDepartments() {
+  const file = documentInput.files?.[0];
+  const suggested = file ? lookupSuggestedDepartments(file.name) : [];
+  setSelectedDepartments(suggested);
+}
+
+function addDepartmentValue(rawValue, clearCustom = false) {
+  const department = normalizeDepartmentName(rawValue);
+  if (!department) return;
+  setSelectedDepartments([...state.selectedDepartments, department]);
+  uploadError.textContent = '';
+  if (clearCustom) customDepartmentInput.value = '';
+  departmentSelect.value = '';
+}
+
+async function loadDepartmentCatalog() {
+  try {
+    const catalog = await fetchJson('/api/department-catalog');
+    state.departmentCatalog = {
+      options: uniqueDepartments(catalog.options || []),
+      document_departments: catalog.document_departments || {},
+    };
+  } catch (_error) {
+    state.departmentCatalog = { options: [], document_departments: {} };
+  }
+  renderDepartmentOptions();
+  if (documentInput.files?.length) syncSuggestedDepartments();
 }
 
 async function fetchJson(url, options = {}) {
@@ -343,13 +450,40 @@ function startEvents() {
 documentInput.addEventListener('change', () => {
   const file = documentInput.files[0];
   fileLabel.textContent = file ? file.name : 'Choose a DOCX file';
+  syncSuggestedDepartments();
+});
+
+addDepartmentButton.addEventListener('click', () => {
+  addDepartmentValue(departmentSelect.value);
+});
+
+addCustomDepartmentButton.addEventListener('click', () => {
+  addDepartmentValue(customDepartmentInput.value, true);
+});
+
+customDepartmentInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  addDepartmentValue(customDepartmentInput.value, true);
+});
+
+selectedDepartments.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-remove-department]');
+  if (!button) return;
+  const department = button.dataset.removeDepartment;
+  setSelectedDepartments(state.selectedDepartments.filter((value) => value.toLowerCase() !== String(department).toLowerCase()));
 });
 
 uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   uploadError.textContent = '';
+  if (!state.selectedDepartments.length) {
+    uploadError.textContent = 'Select at least one department before starting.';
+    return;
+  }
   startButton.disabled = true;
   startButton.textContent = 'Starting...';
+  departmentsJson.value = JSON.stringify(state.selectedDepartments);
   const formData = new FormData(uploadForm);
   const response = await fetch('/api/upload', { method: 'POST', body: formData });
   if (!response.ok) {
@@ -371,4 +505,7 @@ downloadTxtButton.addEventListener('click', () => {
   window.location.href = '/api/download-rag-txt';
 });
 
+loadDepartmentCatalog();
+renderSelectedDepartments();
+renderDepartmentOptions();
 fetch('/api/state').then((response) => response.json()).then(applySnapshot).finally(startEvents);

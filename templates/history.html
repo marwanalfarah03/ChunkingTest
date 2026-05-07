@@ -71,6 +71,32 @@
             </div>
             <div class="hist-download-row" id="detailDownloads"></div>
           </div>
+          <section class="hist-department-editor" aria-labelledby="histDepartmentTitle">
+            <div class="hist-department-copy">
+              <p class="hist-section-label">Departments</p>
+              <h3 id="histDepartmentTitle">Update the departments linked to this document.</h3>
+            </div>
+            <div class="hist-department-controls">
+              <label class="department-input-group" for="historyDepartmentSelect">
+                <span>Department list</span>
+                <div class="department-inline-controls">
+                  <select id="historyDepartmentSelect" class="department-select">
+                    <option value="">Select a department</option>
+                  </select>
+                  <button id="historyAddDepartmentButton" class="secondary-button department-add-button" type="button">Add</button>
+                </div>
+              </label>
+              <label class="department-input-group" for="historyCustomDepartmentInput">
+                <span>Custom department</span>
+                <div class="department-inline-controls">
+                  <input id="historyCustomDepartmentInput" class="department-text-input" type="text" placeholder="Write a department name" autocomplete="off">
+                  <button id="historyAddCustomDepartmentButton" class="secondary-button department-add-button" type="button">Add custom</button>
+                </div>
+              </label>
+            </div>
+            <div id="detailDepartmentTags" class="selected-departments hist-selected-departments" aria-live="polite"></div>
+            <p id="detailDepartmentStatus" class="hist-department-status"></p>
+          </section>
           <!-- Tabs -->
           <nav class="hist-tabs" id="histTabs">
             <button class="hist-tab active" data-tab="final">Final Output</button>

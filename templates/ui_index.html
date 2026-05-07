@@ -45,6 +45,31 @@
             <strong id="fileLabel">Choose a DOCX file</strong>
             <small>Tables, nested tables, colors, and embedded files will be preserved for review.</small>
           </label>
+          <section class="department-panel" aria-label="Departments">
+            <div class="department-panel-copy">
+              <p class="eyebrow">Departments</p>
+            </div>
+            <div class="department-controls">
+              <label class="department-input-group" for="departmentSelect">
+                <span>Department list</span>
+                <div class="department-inline-controls">
+                  <select id="departmentSelect" class="department-select">
+                    <option value="">Select a department</option>
+                  </select>
+                  <button id="addDepartmentButton" class="secondary-button department-add-button" type="button">Add</button>
+                </div>
+              </label>
+              <label class="department-input-group" for="customDepartmentInput">
+                <span>Custom department</span>
+                <div class="department-inline-controls">
+                  <input id="customDepartmentInput" class="department-text-input" type="text" placeholder="Write a department name" autocomplete="off">
+                  <button id="addCustomDepartmentButton" class="secondary-button department-add-button" type="button">Add custom</button>
+                </div>
+              </label>
+            </div>
+            <div id="selectedDepartments" class="selected-departments" aria-live="polite"></div>
+            <input id="departmentsJson" name="departments_json" type="hidden" value="[]">
+          </section>
           <details class="settings-panel">
             <summary>Settings</summary>
             <label>AI server address

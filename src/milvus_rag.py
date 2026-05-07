@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -528,6 +529,115 @@ def _normalize_hit(raw_hit: dict[str, Any], rank: int) -> dict[str, Any]:
     }
 
 
+_CHUNKING_QUERY_OUTPUT_FIELDS = [
+    "document_id",
+    "document_name",
+    "chunk_id",
+    "file_name",
+    "section_id",
+    "chunk_type",
+    "hierarchy_path",
+    "text",
+]
+
+_POLICIES_QUERY_OUTPUT_FIELDS = [
+    "source",
+    "chunk_file",
+    "section_id",
+    "chunk_type",
+    "hierarchy_path",
+    "document",
+]
+
+
+def _doc_dir_to_id(dir_name: str) -> str:
+    return base64.urlsafe_b64encode(dir_name.encode("utf-8")).decode().rstrip("=")
+
+
+def _doc_id_to_dir_name(doc_id: str) -> str:
+    padding = (4 - len(doc_id) % 4) % 4
+    return base64.urlsafe_b64decode(doc_id + "=" * padding).decode("utf-8")
+
+
+def _collection_field_names(client: MilvusClient, *, collection_name: str) -> set[str]:
+    description = client.describe_collection(collection_name=collection_name)
+    return {
+        str(field.get("name") or "")
+        for field in description.get("fields") or []
+        if isinstance(field, dict) and field.get("name")
+    }
+
+
+def _detect_query_schema(field_names: set[str]) -> str:
+    if {"document_id", "document_name", "chunk_id", "file_name", "text"}.issubset(field_names):
+        return "chunking"
+    if {"source", "chunk_file", "document"}.issubset(field_names):
+        return "policies"
+    raise RuntimeError(
+        "Unsupported Milvus schema. Expected either the ChunkingApp fields "
+        "(document_id, document_name, chunk_id, file_name, text) or the "
+        "Policies_Procedures fields (source, chunk_file, document)."
+    )
+
+
+def _query_output_fields(field_names: set[str], *, schema_name: str) -> list[str]:
+    preferred = _CHUNKING_QUERY_OUTPUT_FIELDS if schema_name == "chunking" else _POLICIES_QUERY_OUTPUT_FIELDS
+    return [field_name for field_name in preferred if field_name in field_names]
+
+
+def _normalize_filter_values(document_ids: list[str], *, schema_name: str) -> list[str]:
+    if schema_name != "policies":
+        return document_ids
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for document_id in document_ids:
+        try:
+            source_name = _doc_id_to_dir_name(document_id)
+        except Exception:
+            source_name = document_id
+        if not source_name or source_name in seen:
+            continue
+        normalized.append(source_name)
+        seen.add(source_name)
+    return normalized
+
+
+def _build_document_filter_for_field(document_ids: list[str], *, field_name: str = "document_id") -> str:
+    if not document_ids:
+        return ""
+    if len(document_ids) == 1:
+        return f'{field_name} == {_quote_milvus_string(document_ids[0])}'
+    return f"{field_name} in {json.dumps(document_ids, ensure_ascii=False)}"
+
+
+def _normalize_hit_for_schema(raw_hit: dict[str, Any], rank: int, *, schema_name: str) -> dict[str, Any]:
+    if schema_name == "chunking":
+        return _normalize_hit(raw_hit, rank)
+
+    entity = raw_hit.get("entity") if isinstance(raw_hit, dict) else None
+    if not isinstance(entity, dict):
+        entity = raw_hit
+
+    source_name = str(entity.get("source") or "")
+    file_name = str(entity.get("chunk_file") or "")
+    text = str(entity.get("document") or "")
+    chunk_id = Path(file_name).stem if file_name else ""
+    return {
+        "rank": rank,
+        "id": raw_hit.get("id") if isinstance(raw_hit, dict) else None,
+        "document_id": _doc_dir_to_id(source_name) if source_name else "",
+        "document_name": source_name,
+        "chunk_id": chunk_id,
+        "file_name": file_name,
+        "section_id": str(entity.get("section_id") or ""),
+        "chunk_type": str(entity.get("chunk_type") or ""),
+        "hierarchy_path": str(entity.get("hierarchy_path") or ""),
+        "text": text,
+        "milvus_score": _safe_json_float(raw_hit.get("distance") if isinstance(raw_hit, dict) else 0.0, default=None),
+    }
+
+
 _QUERY_OUTPUT_FIELDS = [
     "document_id",
     "document_name",
@@ -557,11 +667,7 @@ def _normalize_document_ids(document_ids: Iterable[str] | None) -> list[str]:
 
 
 def _build_document_filter(document_ids: list[str]) -> str:
-    if not document_ids:
-        return ""
-    if len(document_ids) == 1:
-        return f'document_id == {_quote_milvus_string(document_ids[0])}'
-    return f"document_id in {json.dumps(document_ids, ensure_ascii=False)}"
+    return _build_document_filter_for_field(document_ids, field_name="document_id")
 
 
 def query_collection(
@@ -583,19 +689,24 @@ def query_collection(
     clean_top_k = max(1, int(top_k or DEFAULT_TOP_K))
     clean_top_n = max(1, int(top_n or DEFAULT_TOP_N))
     resolved_device = resolve_device()
-    normalized_document_ids = _normalize_document_ids(document_ids)
-    document_filter = _build_document_filter(normalized_document_ids)
     ef_search = max(DEFAULT_HNSW_EF_SEARCH, clean_top_k)
 
     client = _connect_client(milvus_uri=milvus_uri, milvus_token=milvus_token, milvus_db_name=milvus_db_name)
     if not client.has_collection(collection_name=validated_collection_name):
         raise RuntimeError(f"Collection {validated_collection_name} was not found in Milvus.")
+    field_names = _collection_field_names(client, collection_name=validated_collection_name)
+    schema_name = _detect_query_schema(field_names)
+    normalized_document_ids = _normalize_document_ids(document_ids)
+    filter_values = _normalize_filter_values(normalized_document_ids, schema_name=schema_name)
+    filter_field_name = "document_id" if schema_name == "chunking" else "source"
+    document_filter = _build_document_filter_for_field(filter_values, field_name=filter_field_name)
+    output_fields = _query_output_fields(field_names, schema_name=schema_name)
     client.load_collection(collection_name=validated_collection_name)
-    if len(normalized_document_ids) == 1:
+    if len(filter_values) == 1:
         raw_hits = client.query(
             collection_name=validated_collection_name,
             filter=document_filter,
-            output_fields=_QUERY_OUTPUT_FIELDS,
+            output_fields=output_fields,
         )
     else:
         query_embedding = embed_texts([query_text], device=resolved_device, batch_size=1)[0].tolist()
@@ -604,18 +715,22 @@ def query_collection(
             data=[query_embedding],
             filter=document_filter,
             limit=clean_top_k,
-            output_fields=_QUERY_OUTPUT_FIELDS,
+            output_fields=output_fields,
             search_params={
                 "metric_type": "COSINE",
                 "params": {"ef": ef_search},
             },
         )
         raw_hits = raw_results[0] if raw_results else []
-    milvus_hits = [_normalize_hit(hit, rank) for rank, hit in enumerate(raw_hits, start=1)]
+    milvus_hits = [
+        _normalize_hit_for_schema(hit, rank, schema_name=schema_name)
+        for rank, hit in enumerate(raw_hits, start=1)
+    ]
     reranked_documents = rerank_hits(query_text, milvus_hits, top_n=clean_top_n, device=resolved_device)
     return {
         "question": query_text,
         "collection_name": validated_collection_name,
+        "schema_name": schema_name,
         "top_k": clean_top_k,
         "top_n": clean_top_n,
         "index_type": "HNSW",
